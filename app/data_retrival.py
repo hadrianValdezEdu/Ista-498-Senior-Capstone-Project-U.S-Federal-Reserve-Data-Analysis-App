@@ -24,5 +24,9 @@ def get_data(series_id, api_key):
     
     return df[['date', 'value']]
 
+# This function returns the primary FRED source used. We will definiitely need this helper function later on.
+def fred_source_link(series_id):
+    return f"https://fred.stlouisfed.org/series/{series_id}"
+
 df = get_data(series_id, api_key)
 df.to_csv('gdp_data.csv', index=True)
