@@ -60,26 +60,35 @@ class Search():
         )
         return requests.get(url).json()
     
-    def user_selection(self):
-            selection_df = []
-            for lst in self.get_subcategories().values():
-                for dictionary in lst:
-                    id = dictionary["id"]
-                    name = dictionary["name"]
-                    selection_df.append(name)
-                    selection_df.append(id)
+    def get_category_id(self):
+        # pandas has built in dataframe compatibility for lists containing dicts.
+        # This pd.Dataframelist([dict{}]) data structure will be needed for
+        # Excel and JSON compatibility.
+        selection_df = []
 
-            # this df is created so that integer values are ints, instead of  "1", "2", strings, etc.
-            selection_df = pd.DataFrame(selection_df)
-
-            # .reshape(-1,2) --> (rows, columns) --> (auto-compute the amount of rows needed, 3 columns)
-            # each item within the df is reshaped into a list that resembles this --> [category, series_id]
-            selection_df = np.array(selection_df).reshape(-1,2)
-
-            # each item (which is a list of 2 items) becomes a df containing 2 columns
-            selection_df = pd.DataFrame(selection_df, columns=["category", "series_id"])
-            return selection_df
+        for lst in self.get_subcategories().values():
+            for dictionary in lst:
+                selection_df.append({
+                    "category": dictionary["name"],
+                    "category_id": dictionary["id"]
+                    })
+                
+        return pd.DataFrame(selection_df)
     
+    #Function to retrieve data from FRED API and download it as a CSV to the working directory
+    def get_data(self, series_id):
+        url = (
+            "https://api.stlouisfed.org/fred/series/observations"
+            f"?series_id={series_id}&api_key={self.api_key}&file_type=json"
+        )
+        response = requests.get(url)
+        data = response.json()
+
+        df = pd.DataFrame(data["observations"])
+        df["date"] = pd.to_datetime(df["date"])
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+
+        return df[["date", "value"]]
 
 if __name__ == "__main__":
     df = get_data(series_id, api_key)
