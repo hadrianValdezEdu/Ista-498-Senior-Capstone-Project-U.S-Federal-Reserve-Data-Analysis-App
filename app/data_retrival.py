@@ -16,10 +16,6 @@ for now you can add your API key directly in the function call below. Just do no
 def fred_source_link(series_id):
     return f"https://fred.stlouisfed.org/series/{series_id}"
 
-
-def fred_source_link(series_id):
-    return f"https://fred.stlouisfed.org/series/{series_id}"
-
 # This class will be used to create a search button within excel.
 # currently the method "user_selection()" within this class has to be updated in such
 # a way that makes it better compatible with excel. this class for now will be for archival purposes
