@@ -60,6 +60,14 @@ class Search():
         df["value"] = pd.to_numeric(df["value"], errors="coerce")
 
         return df[["date", "value"]]
+    
+    # If this function shouldn't be here let me know. -David
+    # this function is designed to find any mising data points and replace those values with error.
+    def missingValues(self, series_id):
+        df = self.get_data(series_id)
+        errors = df.isnull()
+        df["error"] = errors["value"]
+        return df
 
 if __name__ == "__main__":
     df = get_data(series_id, api_key)
