@@ -89,6 +89,14 @@ class Search():
 
         return df[["date", "value"]]
     
+    # If this function shouldn't be here let me know. -David
+    # this function is designed to find any mising data points and replace those values with error.
+    def missingValues(self, series_id):
+        df = self.get_data(series_id)
+        errors = df.isnull()
+        df["error"] = errors["value"]
+        return df
+
     # this function is safe to delete whenever needed.
 def example():
     print("test_var.get_category_id()\n", test_var.get_category_id())
