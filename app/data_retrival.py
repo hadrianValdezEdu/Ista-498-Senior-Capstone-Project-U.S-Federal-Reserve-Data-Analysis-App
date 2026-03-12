@@ -1,16 +1,24 @@
+import os
 import requests
 import pandas as pd
 import numpy as np
+from dotenv import load_dotenv
 
-series_id = 'GDP' 
-#when you search for a data point on the FRED homepage and click on a chart the Series ID is listed in parentheses next to the title
-api_key = 'Replace with you key. Do not push to github with the key in it'
+# Load api key from .env 
+load_dotenv()
 
-'''
-Unsure how we want to procced with adding API key, for security reasons I will not add it here yet.
-Working on getting an .env and .gitignore setup to keep it secure when pushing to github.
-for now you can add your API key directly in the function call below. Just do not Push it to cloud with the key in it.
-'''
+series_id = 'GDP'
+# when you search for a data point on the FRED homepage and click on a chart
+# the Series ID is listed in parentheses next to the title
+
+# API key is read from the .env file for security reasons
+# When you pull copy .env.example use it to create a .env file and add your API key
+api_key = os.getenv("FRED_API_KEY")
+if not api_key:
+    raise EnvironmentError(
+        "FRED_API_KEY is not set"
+        "Copy .env.example and create a .env fileand add your API key"
+    )
 
 # This function returns the primary FRED source used. We will definiitely need this helper function later on.
 def fred_source_link(series_id):
@@ -112,10 +120,10 @@ def example():
     print("test_var.get_series(32992)\n",test_var.get_series(32992))
 
 if __name__ == "__main__":
-    #df = get_data(series_id, api_key)
-    #df.to_csv('gdp_data.csv', index=True)
-    
-    # example of Search()
-    # api_key = "ENTER YOUR API KEY HERE"
-    test_var = Search(api_key = "")
+    # api_key is loaded from .env above
+    # df = get_data(series_id, api_key)
+    # df.to_csv('gdp_data.csv', index=True)
+
+    # example of search
+    test_var = Search(api_key=api_key)
     example()

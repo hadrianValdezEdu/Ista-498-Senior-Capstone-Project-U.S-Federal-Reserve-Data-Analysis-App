@@ -1,0 +1,5 @@
+# Ignore environment variables 
+.env
+.env.*
+!.env.example        # Allow the example/template file to be committed
+
