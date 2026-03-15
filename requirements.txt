@@ -2,6 +2,8 @@
 requests
 pandas
 numpy
+typing
+warnings
 
 # Loads variables from .env
 python-dotenv
