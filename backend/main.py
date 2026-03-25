@@ -6,7 +6,7 @@ from search import Search
 app = FastAPI()
 
 # Initialize Search class
-search = Search(api_key='Replace with you key. Do not push to github with the key in it')
+search = Search(api_key="ENTER YOUR API KEY HERE") # create an instance of the Search class, which will be used to call the methods in the Search class
 
 # Allow Excel add-in to call this server
 # without this, excel would block everything

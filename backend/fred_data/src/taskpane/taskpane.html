@@ -21,6 +21,10 @@
     <div id="app">
         <h2>FRED Data Tools</h2>
 
+        <!-- Search Button Configuration-->
+        <input type="url" id="searchInput" name="SearchInput" placeholder="Enter FRED URL: " />
+        <button onclick="search()">Search</button>
+
         <!-- Button container for add-in actions -->
         <div id="button-container">
             <button id="btnGetCategories">Get Categories</button>
@@ -30,5 +34,6 @@
 
         <div id="output"></div>
     </div>
+<script src="taskpane.js"></script>
 </body>
 </html>

@@ -304,3 +304,19 @@ async function insertDataIntoExcel(data) {
   });
 }
 // -----------------------------
+// This function is called when the user clicks the "Search" button in the task pane. It takes the search query from an input field, sends it to the backend, and displays the search results in the task pane.
+async function searchInput() {
+  const query = document.getElementById("searchInput").value;
+  document.getElementById("output").innerHTML = `Searching for "${query}"...`;
+
+  try {
+    const response = await fetch(
+      `http://localhost:5000/search/${encodeURIComponent(query)}`
+    );
+    const data = await response.json();
+    renderSeries(data);
+  } catch (error) {
+    document.getElementById("output").innerHTML = "Error performing search.";
+    console.error(error);
+  }
+} 
