@@ -77,3 +77,24 @@ class Search():
         df = df.where(pd.notnull(df), None)
 
         return df
+
+    def get_series_info(self, series_id):
+        url = (
+            "https://api.stlouisfed.org/fred/series"
+            f"?series_id={series_id}&api_key={self.api_key}&file_type=json"
+        )
+        data = requests.get(url).json()
+
+        series_list = data.get("seriess", [])
+
+        rows = []
+        for s in series_list:
+            rows.append({
+                "series_id": s["id"],
+                "title": s["title"],
+                "frequency": s["frequency"],
+                "units": s["units"],
+                "seasonal_adjustment": s["seasonal_adjustment"]
+            })
+
+        return rows

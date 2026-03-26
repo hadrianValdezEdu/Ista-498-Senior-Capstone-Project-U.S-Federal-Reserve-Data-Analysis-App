@@ -6,7 +6,7 @@ from search import Search
 app = FastAPI()
 
 # Initialize Search class
-search = Search(api_key="ENTER YOUR API KEY HERE") # create an instance of the Search class, which will be used to call the methods in the Search class
+search = Search(api_key="") # create an instance of the Search class, which will be used to call the methods in the Search class
 
 # Allow Excel add-in to call this server
 # without this, excel would block everything
@@ -41,3 +41,10 @@ def series(category_id: int):
 def data(series_id: str):
     df = search.get_data(series_id)        # call the Search() class method
     return df.to_dict(orient="records")    # convert pandas df into JSON friendly format for excel to read
+
+# GET ENDPOINT 4 — Return metadata for a specific series ID
+# Example: http://localhost:5000/search/GDP
+@app.get("/search/{series_id}")
+def search_series(series_id: str):
+    data = search.get_series_info(series_id)
+    return data

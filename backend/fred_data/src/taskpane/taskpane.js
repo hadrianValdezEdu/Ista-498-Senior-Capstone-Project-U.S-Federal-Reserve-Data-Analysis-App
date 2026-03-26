@@ -70,7 +70,6 @@ function renderCategories(categories, parentCategoryId) {
 
 // GET SERIES FOR SELECTED CATEGORY
 // -----------------------------
-
 async function getSeries() {
   if (!selectedCategoryId) {
     document.getElementById("output").innerHTML = "Please select a category first.";
@@ -109,15 +108,20 @@ function renderSeries(seriesList) {
   document.querySelectorAll(".series-item").forEach(item => {
     item.onclick = () => {
       selectedSeriesId = item.getAttribute("data-id");
-      output.innerHTML = `<p>Selected Series ID: ${selectedSeriesId}</p>`;
+      output.insertAdjacentHTML("beforeend", `<p>Selected Series ID: ${selectedSeriesId}</p>`);
     };
   });
 }
-
 // -----------------------------
 
 // -----------------------------
 async function getData() {
+  // If nothing in memory, try loading from storage
+  if (!selectedSeriesId) {
+    selectedSeriesId = await OfficeRuntime.storage.getItem("lastSeriesId");
+  }
+
+  // If STILL nothing, then show the error
   if (!selectedSeriesId) {
     document.getElementById("output").innerHTML =
       "Please select a series first.";
@@ -125,7 +129,7 @@ async function getData() {
   }
 
   document.getElementById("output").innerHTML =
-    "Fetching data for selected series...";
+    `Fetching data for ${selectedSeriesId}...`;
 
   try {
     const response = await fetch(
@@ -136,7 +140,8 @@ async function getData() {
     await insertDataIntoExcel(data);
 
     document.getElementById("output").innerHTML =
-      "Data inserted into Excel successfully.";
+      `Data for ${selectedSeriesId} inserted into Excel successfully.`;
+
   } catch (error) {
     document.getElementById("output").innerHTML = "Error fetching data.";
     console.error(error);
@@ -159,7 +164,9 @@ async function insertDataIntoExcel(data) {
 }
 // -----------------------------
 async function searchInput() {
-  const query = document.getElementById("searchInput").value;
+  let query = document.getElementById("searchInput").value;
+  query = extractSeriesId(query);
+
   document.getElementById("output").innerHTML = `Searching for "${query}"...`;
 
   try {
@@ -167,9 +174,56 @@ async function searchInput() {
       `http://localhost:5000/search/${encodeURIComponent(query)}`
     );
     const data = await response.json();
-    renderSeries(data);
+
+    if (data.length === 0) {
+      document.getElementById("output").innerHTML = "No series found.";
+      return;
+    }
+
+    // Automatically select the first result
+    selectedSeriesId = data[0].series_id;
+
+    // Store the selected series ID in OfficeRuntime storage for later retrieval (To use on another excel sheet)
+    await OfficeRuntime.storage.setItem("lastSeriesId", selectedSeriesId);
+
+    document.getElementById("output").innerHTML =
+      `Found series: ${selectedSeriesId}. Loading data...`;
+
+    // Now automatically load the data
+    await autoLoadData(selectedSeriesId);
+
   } catch (error) {
     document.getElementById("output").innerHTML = "Error performing search.";
     console.error(error);
   }
-} 
+}
+
+async function autoLoadData(seriesId) {
+  try {
+    const response = await fetch(
+      `http://localhost:5000/data/${seriesId}`
+    );
+    const data = await response.json();
+
+    await insertDataIntoExcel(data);
+
+    document.getElementById("output").innerHTML =
+      `Data for ${seriesId} inserted into Excel.`;
+
+  } catch (error) {
+    document.getElementById("output").innerHTML = "Error loading data.";
+    console.error(error);
+  }
+}
+
+function extractSeriesId(input) {
+  // If user pasted a full FRED URL, extract the last part
+  try {
+    const url = new URL(input);
+    const parts = url.pathname.split("/");
+    return parts.pop() || parts.pop(); // handles trailing slash
+  } catch {
+    // Not a URL, assume it's already a series ID
+    return input.trim();
+  }
+}
