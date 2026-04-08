@@ -4,6 +4,9 @@ pandas
 numpy
 typing
 warnings
+fastapi
+uvicorn
+
 
 # Loads variables from .env
 python-dotenv
