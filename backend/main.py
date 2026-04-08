@@ -15,7 +15,7 @@ search = Search(api_key="")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://localhost:3000", "https://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,5 +54,6 @@ def data(series_id: str):
 
 @app.get("/logic/search/{series_id}")
 def search_series(series_id: str):
-    info, data = search.user_selection(series_id)
-    return {"info": info, "data": data}
+    info = search.get_series(series_id)
+    data_df = search.get_data(series_id)
+    return {"info": info, "data": data_df.to_dict(orient="records")}

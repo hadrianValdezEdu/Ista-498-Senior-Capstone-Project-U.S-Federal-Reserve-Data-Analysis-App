@@ -50,7 +50,7 @@ async function getSubcategories(categoryId) {
     if (categoryCache.has(categoryId)) {
         return categoryCache.get(categoryId);
     }
-    const data = await fetchJSON(`http://localhost:5000/categories/${categoryId}`);
+    const data = await fetchJSON(`http://127.0.0.1:5000/categories/${categoryId}`);
     categoryCache.set(categoryId, data);
     return data;
 }
@@ -59,7 +59,7 @@ async function getSeries(categoryId) {
     if (seriesCache.has(categoryId)) {
         return seriesCache.get(categoryId);
     }
-    const data = await fetchJSON(`http://localhost:5000/series/${categoryId}`);
+    const data = await fetchJSON(`http://127.0.0.1:5000/series/${categoryId}`);
     seriesCache.set(categoryId, data);
     return data;
 }
@@ -68,7 +68,7 @@ async function getData(seriesId) {
     if (dataCache.has(seriesId)) {
         return dataCache.get(seriesId);
     }
-    const data = await fetchJSON(`http://localhost:5000/data/${seriesId}`);
+    const data = await fetchJSON(`http://127.0.0.1:5000/data/${seriesId}`);
     dataCache.set(seriesId, data);
     return data;
 }
@@ -171,7 +171,7 @@ async function textSearch() {
     infoEl.innerHTML = "Searching series...";
     outputEl.innerHTML = "";
 
-    const result = await fetchJSON(`http://localhost:5000/logic/search/${input}`);
+    const result = await fetchJSON(`http://127.0.0.1:5000/logic/search/${input}`);
 
     const infoList = result.info || [];
     const data = result.data || [];
