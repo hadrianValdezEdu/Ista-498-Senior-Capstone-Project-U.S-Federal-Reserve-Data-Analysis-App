@@ -3,227 +3,279 @@
  * See LICENSE in the project root for license information.
  */
 
-// Global State
-// -----------------------------
-let selectedCategoryId = null;
-let selectedSeriesId = null;
-// -----------------------------
 
-// -----------------------------
+/* --------------------------------------------------------------------------
+   GLOBAL STATE & CACHES
+-------------------------------------------------------------------------- */
+
+let categoryCache = new Map();   // categoryId -> subcategories[]
+let seriesCache = new Map();     // categoryId -> series[]
+let dataCache = new Map();       // seriesId -> data[]
+let navStack = [];            // Stack to keep track of navigation for "back" button feature
+
+let currentSeriesId = null;
+let currentData = null;
+
+let outputEl = null;
+let infoEl = null;
+let btnLoadData = null;
+
+/* --------------------------------------------------------------------------
+   INITIALIZATION
+-------------------------------------------------------------------------- */
+
 Office.onReady(() => {
-  document.getElementById("btnGetCategories").onclick = () => {getSubcategories(0)};
-  document.getElementById("btnGetSeries").onclick = getSeries;
-  document.getElementById("btnGetData").onclick = getData;
+    outputEl = document.getElementById("output");
+    infoEl = document.getElementById("info");
+    btnLoadData = document.getElementById("btnLoadData");
+
+    document.getElementById("btnGetCategories").onclick = loadRootCategories;
+    document.getElementById("btnSearch").onclick = textSearch;
+    document.getElementById("btnBack").onclick = goBack;
+    btnLoadData.onclick = insertDataIntoExcel;
+
+    outputEl.addEventListener("click", onOutputClick);
 });
-// -----------------------------
 
-//  GET CATEGORIES
-// -----------------------------
+/* --------------------------------------------------------------------------
+   HELPERS
+-------------------------------------------------------------------------- */
+
+async function fetchJSON(url) {
+    const res = await fetch(url);
+    return await res.json();
+}
+
 async function getSubcategories(categoryId) {
-  document.getElementById("output").innerHTML = "Fetching categories...";
-
-  try {
-    const response = await fetch(
-      `http://localhost:5000/categories/${categoryId}`
-    );
-
-    const data = await response.json();
-
-    renderCategories(data, categoryId);
-  } catch (error) {
-    document.getElementById("output").innerHTML = "Error fetching categories.";
-    console.error(error);
-  }
+    if (categoryCache.has(categoryId)) {
+        return categoryCache.get(categoryId);
+    }
+    const data = await fetchJSON(`http://localhost:5000/categories/${categoryId}`);
+    categoryCache.set(categoryId, data);
+    return data;
 }
-// -----------------------------
 
-function renderCategories(categories, parentCategoryId) {
-  const output = document.getElementById("output");
-
-  let html = `<h3>Select a Category (Parent ID: ${parentCategoryId})</h3><ul>`;
-
-  categories.forEach(cat => {
-    html += `
-      <li class="category-item" data-id="${cat.category_id}">
-        ${cat.category} (ID: ${cat.category_id})
-      </li>`;
-  });
-  html += "</ul>";
-  html += `
-    <button id="btnViewSeries">View Series in Category ${parentCategoryId}</button>
-  `;
-  output.innerHTML = html;
-
-  document.querySelectorAll(".category-item").forEach(item => {
-    item.onclick = () => {
-      selectedCategoryId = item.getAttribute("data-id");
-      getSubcategories(selectedCategoryId);
-    };
-  });
-
-  document.getElementById("btnViewSeries").onclick = () => {
-    selectedCategoryId = parentCategoryId;
-    getSeries();
-  };
+async function getSeries(categoryId) {
+    if (seriesCache.has(categoryId)) {
+        return seriesCache.get(categoryId);
+    }
+    const data = await fetchJSON(`http://localhost:5000/series/${categoryId}`);
+    seriesCache.set(categoryId, data);
+    return data;
 }
-// -----------------------------
 
-// GET SERIES FOR SELECTED CATEGORY
-// -----------------------------
-async function getSeries() {
-  if (!selectedCategoryId) {
-    document.getElementById("output").innerHTML = "Please select a category first.";
-    return;
-  }
+async function getData(seriesId) {
+    if (dataCache.has(seriesId)) {
+        return dataCache.get(seriesId);
+    }
+    const data = await fetchJSON(`http://localhost:5000/data/${seriesId}`);
+    dataCache.set(seriesId, data);
+    return data;
+}
 
-  document.getElementById("output").innerHTML = "Fetching series for selected category...";
+function updateBackButton() {
+    const btnBack = document.getElementById("btnBack");
+    btnBack.disabled = navStack.length === 0;
+}
 
-  try {
-    const response = await fetch(
-      `http://localhost:5000/series/${selectedCategoryId}`
-    );
-    const data = await response.json();
-    renderSeries(data);
-  } catch (error) {
-    document.getElementById("output").innerHTML = "Error fetching series.";
-    console.error(error);
-  }
+/* --------------------------------------------------------------------------
+   CATEGORY / SERIES BROWSING
+-------------------------------------------------------------------------- */
+
+async function loadRootCategories() {
+    infoEl.innerHTML = "";
+    const categories = await getSubcategories(0);
+    renderCategories(categories);
+}
+
+async function onOutputClick(event) {
+    const target = event.target.closest("[data-type]");
+    if (!target) return;
+
+    const type = target.dataset.type;
+
+    if (type === "category") {
+        const categoryId = parseInt(target.dataset.id, 10);
+        await handleCategoryClick(categoryId);
+    } else if (type === "series") {
+        const seriesId = target.dataset.id;
+        await handleSeriesClick(seriesId);
+    }
+}
+
+async function handleCategoryClick(categoryId) {
+    infoEl.innerHTML = "";
+
+    navStack.push(categoryId);
+
+    const subcats = await getSubcategories(categoryId);
+
+    if (subcats && subcats.length > 0) {
+        renderCategories(subcats);
+    } else {
+        const seriesList = await getSeries(categoryId);
+        renderSeries(seriesList);
+    }
+
+    updateBackButton();
+}
+
+async function handleSeriesClick(seriesId) {
+    infoEl.innerHTML = "Loading data for selected series...";
+    const data = await getData(seriesId);
+
+    currentSeriesId = seriesId;
+    currentData = data;
+
+    infoEl.innerHTML = `
+        <p><strong>Series selected:</strong> ${seriesId}</p>
+        <p>Data is ready to load into Excel.</p>
+    `;
+
+    btnLoadData.disabled = false;
+}
+
+async function goBack() {
+    if (navStack.length <= 1) {
+        navStack = [];
+        const rootCats = await getSubcategories(0);
+        renderCategories(rootCats);
+        updateBackButton();
+        return;
+    }
+
+    navStack.pop();
+
+    const previousCategoryId = navStack[navStack.length - 1];
+
+    const subcats = await getSubcategories(previousCategoryId);
+
+    if (subcats.length > 0) {
+        renderCategories(subcats);
+    } else {
+        const seriesList = await getSeries(previousCategoryId);
+        renderSeries(seriesList);
+    }
+
+    updateBackButton();
+}
+
+/* --------------------------------------------------------------------------
+   TEXT SEARCH LOGIC
+-------------------------------------------------------------------------- */
+
+async function textSearch() {
+    const input = document.getElementById("searchInput").value.trim();
+    if (!input) return;
+
+    infoEl.innerHTML = "Searching series...";
+    outputEl.innerHTML = "";
+
+    const result = await fetchJSON(`http://localhost:5000/logic/search/${input}`);
+
+    const infoList = result.info || [];
+    const data = result.data || [];
+
+    currentSeriesId = infoList.length > 0 ? infoList[0].series_id : input;
+    currentData = data;
+
+    renderSeriesInfo(infoList);
+
+    infoEl.innerHTML = `
+        <p><strong>Series selected via search:</strong> ${currentSeriesId}</p>
+        <p>Data is ready to load into Excel.</p>
+    `;
+
+    btnLoadData.disabled = false;
+}
+
+/* --------------------------------------------------------------------------
+   RENDERING FUNCTIONS
+-------------------------------------------------------------------------- */
+
+function renderCategories(categories) {
+    outputEl.innerHTML = "<h3>Select a Category</h3>";
+
+    const frag = document.createDocumentFragment();
+
+    categories.forEach(cat => {
+        const div = document.createElement("div");
+        div.className = "category-item";
+        div.dataset.type = "category";
+        div.dataset.id = cat.category_id;
+        div.textContent = cat.category;
+        frag.appendChild(div);
+    });
+
+    outputEl.appendChild(frag);
 }
 
 function renderSeries(seriesList) {
-  const output = document.getElementById("output");
+    outputEl.innerHTML = "<h3>Select a Series</h3>";
 
-  let html = "<h3>Select a Series</h3><ul>";
+    const frag = document.createDocumentFragment();
 
-  seriesList.forEach(series => {
-    html += `
-      <li class="series-item" data-id="${series.series_id}">
-        ${series.title} (ID: ${series.series_id})
-      </li>`;
-  });
+    seriesList.forEach(s => {
+        const div = document.createElement("div");
+        div.className = "series-item";
+        div.dataset.type = "series";
+        div.dataset.id = s.series_id;
+        div.textContent = `${s.title} (${s.series_id})`;
+        frag.appendChild(div);
+    });
 
-  html += "</ul>";
-  output.innerHTML = html;
-
-  document.querySelectorAll(".series-item").forEach(item => {
-    item.onclick = () => {
-      selectedSeriesId = item.getAttribute("data-id");
-      output.insertAdjacentHTML("beforeend", `<p>Selected Series ID: ${selectedSeriesId}</p>`);
-    };
-  });
+    outputEl.appendChild(frag);
 }
-// -----------------------------
 
-// -----------------------------
-async function getData() {
-  // If nothing in memory, try loading from storage
-  if (!selectedSeriesId) {
-    selectedSeriesId = await OfficeRuntime.storage.getItem("lastSeriesId");
-  }
+function renderSeriesInfo(infoList) {
+    outputEl.innerHTML = "<h3>Series Info</h3>";
 
-  // If STILL nothing, then show the error
-  if (!selectedSeriesId) {
-    document.getElementById("output").innerHTML =
-      "Please select a series first.";
-    return;
-  }
+    const frag = document.createDocumentFragment();
 
-  document.getElementById("output").innerHTML =
-    `Fetching data for ${selectedSeriesId}...`;
+    infoList.forEach(info => {
+        const div = document.createElement("div");
+        div.className = "series-info";
+        div.innerHTML = `
+            <strong>${info.title}</strong><br>
+            ID: ${info.series_id}<br>
+            Frequency: ${info.frequency}<br>
+            Units: ${info.units}<br>
+            Seasonal Adjustment: ${info.seasonal_adjustment}
+        `;
+        frag.appendChild(div);
+    });
 
-  try {
-    const response = await fetch(
-      `http://localhost:5000/data/${selectedSeriesId}`
-    );
-    const data = await response.json();
-
-    await insertDataIntoExcel(data);
-
-    document.getElementById("output").innerHTML =
-      `Data for ${selectedSeriesId} inserted into Excel successfully.`;
-
-  } catch (error) {
-    document.getElementById("output").innerHTML = "Error fetching data.";
-    console.error(error);
-  }
+    outputEl.appendChild(frag);
 }
-// -----------------------------
 
-// -----------------------------
-async function insertDataIntoExcel(data) {
-  await Excel.run(async context => {
-    const sheet = context.workbook.worksheets.getActiveWorksheet();
+/* --------------------------------------------------------------------------
+   EXCEL INSERTION
+-------------------------------------------------------------------------- */
 
-    const rows = data.map(item => [item.date, item.value]);
-
-    const range = sheet.getRange(`A1:B${rows.length}`);
-    range.values = rows;
-
-    await context.sync();
-  });
-}
-// -----------------------------
-async function searchInput() {
-  let query = document.getElementById("searchInput").value;
-  query = extractSeriesId(query);
-
-  document.getElementById("output").innerHTML = `Searching for "${query}"...`;
-
-  try {
-    const response = await fetch(
-      `http://localhost:5000/search/${encodeURIComponent(query)}`
-    );
-    const data = await response.json();
-
-    if (data.length === 0) {
-      document.getElementById("output").innerHTML = "No series found.";
-      return;
+async function insertDataIntoExcel() {
+    if (!currentData || currentData.length === 0) {
+        infoEl.innerHTML = "<p>No data loaded yet.</p>";
+        return;
     }
 
-    // Automatically select the first result
-    selectedSeriesId = data[0].series_id;
+    try {
+        await Excel.run(async context => {
+            const sheet = context.workbook.worksheets.getActiveWorksheet();
 
-    // Store the selected series ID in OfficeRuntime storage for later retrieval (To use on another excel sheet)
-    await OfficeRuntime.storage.setItem("lastSeriesId", selectedSeriesId);
+            const rowCount = currentData.length;
+            const range = sheet.getRange(`A1:B${rowCount}`);
 
-    document.getElementById("output").innerHTML =
-      `Found series: ${selectedSeriesId}. Loading data...`;
+            const values = currentData.map(r => [r.date, r.value]);
+            range.values = values;
 
-    // Now automatically load the data
-    await autoLoadData(selectedSeriesId);
+            sheet.activate();
+            await context.sync();
+        });
 
-  } catch (error) {
-    document.getElementById("output").innerHTML = "Error performing search.";
-    console.error(error);
-  }
-}
-
-async function autoLoadData(seriesId) {
-  try {
-    const response = await fetch(
-      `http://localhost:5000/data/${seriesId}`
-    );
-    const data = await response.json();
-
-    await insertDataIntoExcel(data);
-
-    document.getElementById("output").innerHTML =
-      `Data for ${seriesId} inserted into Excel.`;
-
-  } catch (error) {
-    document.getElementById("output").innerHTML = "Error loading data.";
-    console.error(error);
-  }
-}
-
-function extractSeriesId(input) {
-  // If user pasted a full FRED URL, extract the last part
-  try {
-    const url = new URL(input);
-    const parts = url.pathname.split("/");
-    return parts.pop() || parts.pop(); // handles trailing slash
-  } catch {
-    // Not a URL, assume it's already a series ID
-    return input.trim();
-  }
+        infoEl.innerHTML = `
+            <p>Data for <strong>${currentSeriesId}</strong> loaded into the active sheet.</p>
+        `;
+    } catch (error) {
+        infoEl.innerHTML = `<p>Error loading data into Excel: ${error}</p>`;
+    }
 }
