@@ -54,6 +54,6 @@ def data(series_id: str):
 
 @app.get("/logic/search/{series_id}")
 def search_series(series_id: str):
-    info = search.get_series(series_id)
+    info = search.get_series_info(series_id)
     data_df = search.get_data(series_id)
     return {"info": info, "data": data_df.to_dict(orient="records")}
