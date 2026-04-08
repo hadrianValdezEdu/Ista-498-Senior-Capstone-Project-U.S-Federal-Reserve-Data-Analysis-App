@@ -36,7 +36,7 @@ def categories(category_id: int):
 
 @app.get("/series/{category_id}")
 def series(category_id: int):
-    df = search.get_series_in_category(category_id)
+    df = search.get_series_df(category_id)
     return df.to_dict(orient="records")
 
 # --------------------------------------------------------------------------
