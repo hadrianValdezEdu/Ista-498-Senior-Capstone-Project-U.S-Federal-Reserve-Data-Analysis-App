@@ -78,3 +78,136 @@
 b {
     font-weight: bold;
 }
+
+.buttonStyle {
+    display: block;
+    margin-bottom: 10px;
+    background-color: #0078d7;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    margin: 4px 2px;
+    cursor: pointer;
+}
+
+.buttonStyle:hover {
+    background-color: #0B5E0B;
+}
+
+.buttonStyle:visited {
+    background-color: #ec1c1c;
+}
+
+#output {
+    display:flex;
+    flex-direction: column;
+}
+
+/* Search container layout */
+#search-container {
+    display: flex;
+    gap: 6px;
+
+    margin-bottom: 10px;
+}
+
+#searchInput {
+    flex: 1;
+    padding: 8px;
+    border: 1px solid #CCCCCC;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+/* Search button */
+#btnSearch {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 6px;
+    background-color: #005a9e;
+    color: white;
+    font-size: 13px;
+}
+
+#btnSearch:hover {
+    background-color: #0B5E0B;
+}
+
+#btnGetCategories {
+    display: block;
+    margin-bottom: 10px;
+    background-color: #0078d7;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    margin: 4px 2px;
+    cursor: pointer;
+}
+
+#btnGetCategories:hover {
+    background-color: #0B5E0B;
+}
+
+#btnBack {
+    display: block;
+    margin-bottom: 10px;
+    background-color: #0078d7;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    margin: 4px 2px;
+    cursor: pointer;
+}
+
+#btnBack:disabled {
+    background-color: #CCCCCC;
+    cursor: not-allowed;
+}
+
+#btnBack:hover {
+    background-color: #0B5E0B;
+}
+
+#btnLoadData {
+    display: block;
+    margin-bottom: 10px;
+    background-color: #0078d7;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    margin: 4px 2px;
+    cursor: pointer;
+}
+
+#btnLoadData:disabled {
+    background-color: #CCCCCC;
+    cursor: not-allowed;
+}
+
+#btnLoadData:hover {
+    background-color: #0B5E0B;
+}
+
+.button-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    justify-content: center;
+    align-items: center;
+}

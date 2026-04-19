@@ -16,29 +16,32 @@
 
 <body>
     <div id="app">
-        <h2>FRED Data Tools</h2>
+        <h1 style="display: flex; justify-content: center; height: 20px;">FRED Data Search</h1>
+
+        <br>
 
         <!-- Search box -->
         <div id="search-container">
             <input 
-                type="text" 
+                type="url" 
                 id="searchInput" 
                 name="SearchInput" 
                 placeholder="Enter Series ID or FRED URL"
             />
-            <button id="btnSearch">Search</button>
+            <button id="btnSearch"><strong>Search</strong></button>
         </div>
 
         <!-- Main action buttons -->
-    <div id="button-container">
+    <div style="display: flex; justify-content: center; align-items: center;" class="button-container">
         <button id="btnGetCategories">Get Categories</button>
         <button id="btnBack" disabled>Back</button>
         <button id="btnLoadData" disabled>Load Data into Excel</button>
     </div>
 
         <!-- Dynamic content -->
-        <div id="output"></div>
         <div id="info"></div>
+        <div id="output"></div>
+        
     </div>
 
 

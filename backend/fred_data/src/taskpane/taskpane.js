@@ -199,12 +199,12 @@ function renderCategories(categories) {
     const frag = document.createDocumentFragment();
 
     categories.forEach(cat => {
-        const div = document.createElement("div");
-        div.className = "category-item";
-        div.dataset.type = "category";
-        div.dataset.id = cat.category_id;
-        div.textContent = cat.category;
-        frag.appendChild(div);
+        const button = document.createElement("button");
+        button.className = "buttonStyle";
+        button.dataset.type = "category";
+        button.dataset.id = cat.category_id;
+        button.textContent = cat.category;
+        frag.appendChild(button);
     });
 
     outputEl.appendChild(frag);
@@ -216,12 +216,12 @@ function renderSeries(seriesList) {
     const frag = document.createDocumentFragment();
 
     seriesList.forEach(s => {
-        const div = document.createElement("div");
-        div.className = "series-item";
-        div.dataset.type = "series";
-        div.dataset.id = s.series_id;
-        div.textContent = `${s.title} (${s.series_id})`;
-        frag.appendChild(div);
+        const button = document.createElement("button");
+        button.className = "buttonStyle";
+        button.dataset.type = "series";
+        button.dataset.id = s.series_id;
+        button.textContent = `${s.title} (${s.series_id})`;
+        frag.appendChild(button);
     });
 
     outputEl.appendChild(frag);
