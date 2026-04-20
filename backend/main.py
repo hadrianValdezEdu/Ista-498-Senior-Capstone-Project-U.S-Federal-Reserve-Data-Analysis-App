@@ -57,3 +57,9 @@ def search_series(series_id: str):
     info = search.get_series_info(series_id)
     data_df = search.get_data(series_id)
     return {"info": info, "data": data_df.to_dict(orient="records")}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=8080)

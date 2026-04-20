@@ -27,13 +27,20 @@ class Search():
 
     def get_category_id(self, category_id=0):
         selection_df = []
+        data = self.get_subcategories(category_id)
+        categories = []
 
-        for lst in self.get_subcategories(category_id).values():
-            for dictionary in lst:
-                selection_df.append({
-                    "category": dictionary["name"],
-                    "category_id": dictionary["id"]
-                })
+        if isinstance(data, dict):
+            categories = data.get("categories") or []
+
+        for dictionary in categories:
+            if not isinstance(dictionary, dict):
+                continue
+
+            selection_df.append({
+                "category": dictionary.get("name", ""),
+                "category_id": dictionary.get("id")
+            })
 
         return pd.DataFrame(selection_df)
 

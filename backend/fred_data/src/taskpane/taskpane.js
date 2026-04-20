@@ -20,6 +20,8 @@ let outputEl = null;
 let infoEl = null;
 let btnLoadData = null;
 
+const BACKEND_BASE_URL = "http://127.0.0.1:8080";
+
 /* --------------------------------------------------------------------------
    INITIALIZATION
 -------------------------------------------------------------------------- */
@@ -50,7 +52,7 @@ async function getSubcategories(categoryId) {
     if (categoryCache.has(categoryId)) {
         return categoryCache.get(categoryId);
     }
-    const data = await fetchJSON(`http://127.0.0.1:5000/categories/${categoryId}`);
+    const data = await fetchJSON(`${BACKEND_BASE_URL}/categories/${categoryId}`);
     categoryCache.set(categoryId, data);
     return data;
 }
@@ -59,7 +61,7 @@ async function getSeries(categoryId) {
     if (seriesCache.has(categoryId)) {
         return seriesCache.get(categoryId);
     }
-    const data = await fetchJSON(`http://127.0.0.1:5000/series/${categoryId}`);
+    const data = await fetchJSON(`${BACKEND_BASE_URL}/series/${categoryId}`);
     seriesCache.set(categoryId, data);
     return data;
 }
@@ -68,7 +70,7 @@ async function getData(seriesId) {
     if (dataCache.has(seriesId)) {
         return dataCache.get(seriesId);
     }
-    const data = await fetchJSON(`http://127.0.0.1:5000/data/${seriesId}`);
+    const data = await fetchJSON(`${BACKEND_BASE_URL}/data/${seriesId}`);
     dataCache.set(seriesId, data);
     return data;
 }
@@ -85,7 +87,12 @@ function updateBackButton() {
 async function loadRootCategories() {
     infoEl.innerHTML = "";
     const categories = await getSubcategories(0);
-    renderCategories(categories);
+
+    if (categories && categories.length > 0) {
+        renderCategories(categories);
+    } else {
+        outputEl.innerHTML = "<p>No categories found. Please try again later.</p>";
+    }
 }
 
 async function onOutputClick(event) {
@@ -114,7 +121,13 @@ async function handleCategoryClick(categoryId) {
         renderCategories(subcats);
     } else {
         const seriesList = await getSeries(categoryId);
-        renderSeries(seriesList);
+
+        if (seriesList && seriesList.length > 0) {
+            renderSeries(seriesList);
+        } else {
+            outputEl.innerHTML =
+                "<p>No subcategories or series were found for this category.</p>";
+        }
     }
 
     updateBackButton();
@@ -154,7 +167,13 @@ async function goBack() {
         renderCategories(subcats);
     } else {
         const seriesList = await getSeries(previousCategoryId);
-        renderSeries(seriesList);
+
+        if (seriesList && seriesList.length > 0) {
+            renderSeries(seriesList);
+        } else {
+            outputEl.innerHTML =
+                "<p>No results were found for this category.</p>";
+        }
     }
 
     updateBackButton();
@@ -171,7 +190,7 @@ async function textSearch() {
     infoEl.innerHTML = "Searching series...";
     outputEl.innerHTML = "";
 
-    const result = await fetchJSON(`http://127.0.0.1:5000/logic/search/${input}`);
+    const result = await fetchJSON(`${BACKEND_BASE_URL}/logic/search/${input}`);
 
     const infoList = result.info || [];
     const data = result.data || [];
