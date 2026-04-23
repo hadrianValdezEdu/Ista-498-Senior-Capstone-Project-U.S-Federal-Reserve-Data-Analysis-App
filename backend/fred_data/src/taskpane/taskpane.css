@@ -9,6 +9,12 @@
      height: 100%;
      margin: 0;
      padding: 0;
+
+     /* Spencer the two lines below change the color of the file as well as the text color.
+     If you want to add buttons you will find it in taskpane.html and can look at some exmaples of the current buttons 
+     that are implemented. Then to get your buttons working you would have to add a function in taskpane.js and set your div id="" to that element.*/
+     background-color:#CCCCCC;
+     color: black;
  }
  
  ul {
@@ -128,7 +134,7 @@ b {
     padding: 8px 12px;
     border: none;
     border-radius: 6px;
-    background-color: #005a9e;
+    background-color: #0078d7;
     color: white;
     font-size: 13px;
 }
@@ -210,4 +216,24 @@ b {
     margin-bottom: 10px;
     justify-content: center;
     align-items: center;
+}
+
+/* DO NOT LET ME FORGET TO CHANGE THIS TO THE ML URL. */
+#connorsbtn {
+    display: block;
+    margin-bottom: 10px;
+    background-color: #0078d7;
+    color: white;
+    border: none;
+    padding: 30px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    margin: 4px 2px;
+    cursor: pointer;
+}
+
+#connorsbtn:hover {
+    background-color: #0B5E0B;
 }
