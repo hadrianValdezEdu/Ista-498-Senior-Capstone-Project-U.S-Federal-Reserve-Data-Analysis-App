@@ -128,7 +128,7 @@ b {
     padding: 8px 12px;
     border: none;
     border-radius: 6px;
-    background-color: #0078d7;
+    background-color: #005a9e;
     color: white;
     font-size: 13px;
 }
@@ -137,26 +137,6 @@ b {
     background-color: #0B5E0B;
 }
 
-/* DO NOT LET ME FORGET TO CHANGE THIS TO THE ML URL. */
-#connorsbtn {
-    display: block;
-    margin-bottom: 10px;
-    background-color: #0078d7;
-    color: white;
-    border: none;
-    padding: 10px;
-    text-align: center;
-    text-decoration: none;
-    display: inline-block;
-    font-size: 16px;
-    margin: 4px 2px;
-    cursor: pointer;
-}
-#connorsbtn:hover {
-    background-color: #0B5E0B;
-}
-
-/* Style for First Row of buttons */
 #btnGetCategories {
     display: block;
     margin-bottom: 10px;
@@ -200,7 +180,7 @@ b {
     background-color: #0B5E0B;
 }
 
-#btnLoadDataCurrentSheet {
+#btnLoadData {
     display: block;
     margin-bottom: 10px;
     background-color: #0078d7;
@@ -215,123 +195,12 @@ b {
     cursor: pointer;
 }
 
-#btnLoadDataCurrentSheet:disabled {
+#btnLoadData:disabled {
     background-color: #CCCCCC;
     cursor: not-allowed;
 }
 
-#btnLoadDataCurrentSheet:hover {
-    background-color: #0B5E0B;
-}
-
-#btnLoadDataNewSheet {
-    display: block;
-    margin-bottom: 10px;
-    background-color: #0078d7;
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    text-align: center;
-    text-decoration: none;
-    display: inline-block;
-    font-size: 16px;
-    margin: 4px 2px;
-    cursor: pointer;
-}
-#btnLoadDataNewSheet:disabled {
-    background-color: #CCCCCC;
-    cursor: not-allowed;
-}
-#btnLoadDataNewSheet:hover {
-    background-color: #0B5E0B;
-}
-
-/* Style for Second Row of buttons */
-#btnStatisticalAnalysis {
-    display: block;
-    margin-bottom: 10px;
-    background-color: #0078d7;
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    text-align: center;
-    text-decoration: none;
-    display: inline-block;
-    font-size: 16px;
-    margin: 4px 2px;
-    cursor: pointer;
-}
-#btnStatisticalAnalysis:disabled {
-    background-color: #CCCCCC;
-    cursor: not-allowed;
-}
-#btnStatisticalAnalysis:hover {
-    background-color: #0B5E0B;
-}
-
-#btnQuickRecall {
-    display: block;
-    margin-bottom: 10px;
-    background-color: #0078d7;
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    text-align: center;
-    text-decoration: none;
-    display: inline-block;
-    font-size: 16px;
-    margin: 4px 2px;
-    cursor: pointer;
-}
-#btnQuickRecall:disabled {
-    background-color: #CCCCCC;
-    cursor: not-allowed;
-}
-#btnQuickRecall:hover {
-    background-color: #0B5E0B;
-}
-
-#btnViewBookmarks {
-    display: block;
-    margin-bottom: 10px;
-    background-color: #0078d7;
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    text-align: center;
-    text-decoration: none;
-    display: inline-block;
-    font-size: 16px;
-    margin: 4px 2px;
-    cursor: pointer;
-}
-#btnViewBookmarks:disabled {
-    background-color: #CCCCCC;
-    cursor: not-allowed;
-}
-#btnViewBookmarks:hover {
-    background-color: #0B5E0B;
-}
-
-#btnResetCache {
-    display: block;
-    margin-bottom: 10px;
-    background-color: #0078d7;
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    text-align: center;
-    text-decoration: none;
-    display: inline-block;
-    font-size: 16px;
-    margin: 4px 2px;
-    cursor: pointer;
-}
-#btnResetCache:disabled {
-    background-color: #CCCCCC;
-    cursor: not-allowed;
-}
-#btnResetCache:hover {
+#btnLoadData:hover {
     background-color: #0B5E0B;
 }
 

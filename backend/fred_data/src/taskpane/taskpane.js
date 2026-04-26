@@ -34,7 +34,6 @@ let navStack = [{ type: 'main' }];
 
 let currentSeriesId = null;
 let currentData = null;
-let currentSeriesName = null;
 
 let outputEl = null;
 let infoEl = null;
@@ -298,7 +297,6 @@ async function handleSeriesClick(seriesId) {
 
         const infoList = await fetchJSON(`${BACKEND_BASE_URL}/info/${seriesId}`);
         const info = Array.isArray(infoList) && infoList.length > 0 ? infoList[0] : (infoList || {});
-        currentSeriesName = info.title || seriesId;
         lastLoadedSeries = { seriesId: currentSeriesId, data: currentData, info: info };
         sessionBookmarks.set(currentSeriesId, { seriesId: currentSeriesId, title: info.title || currentSeriesId });
 
@@ -382,7 +380,6 @@ async function textSearch() {
             if (infoList.length > 0) {
                 currentSeriesId = infoList[0].series_id;
                 currentData = data;
-                currentSeriesName = infoList[0].title || currentSeriesId;
 
                 lastLoadedSeries = { seriesId: currentSeriesId, data: currentData, info: infoList[0] };
                 sessionBookmarks.set(currentSeriesId, { seriesId: currentSeriesId, title: infoList[0].title });
@@ -626,11 +623,6 @@ async function loadDataIntoCurrentSheet() {
             dataRange.format.autofitColumns();
             dataRange.getRow(0).format.font.bold = true;
 
-            const safeTableName = "Table_" + currentSeriesId.replace(/[^a-zA-Z0-9]/g, "") + "_" + Math.floor(Math.random() * 1000);
-            const table = sheet.tables.add(dataRange, true);
-            table.name = safeTableName;
-            table.style = "TableStyleMedium2";
-
             // Define the target cell for the pivot table
             const pivotTargetCell = sheet.getCell(0, dataStartColZeroBased + 6); // Leave space for hidden grouping columns + 1 padding
 
@@ -641,7 +633,6 @@ async function loadDataIntoCurrentSheet() {
 
             lastLoadedDataRange = {
                 sheetName: sheet.name,
-                tableName: safeTableName,
                 dataRangeAddress: dataRange.address,
                 dataStartColZeroBased: dataStartColZeroBased,
                 rowCount: dataValues.length,
@@ -658,7 +649,6 @@ async function loadDataIntoCurrentSheet() {
         btnLoadDataCurrentSheet.disabled = false;
         btnLoadDataNewSheet.disabled = false;
     }
-    await createHistogram(currentSeriesName);
 }
 
 async function loadDataIntoNewSheet() {
@@ -709,11 +699,6 @@ async function loadDataIntoNewSheet() {
             dataRange.format.autofitColumns();
             dataRange.getRow(0).format.font.bold = true;
 
-            const safeTableName = "Table_" + currentSeriesId.replace(/[^a-zA-Z0-9]/g, "") + "_" + Math.floor(Math.random() * 1000);
-            const table = newSheet.tables.add(dataRange, true);
-            table.name = safeTableName;
-            table.style = "TableStyleMedium2";
-
             // Define the target cell for the pivot table
             const pivotTargetCell = newSheet.getCell(0, 9); // Col J (3 for metadata/pad + 2 for data + 3 for hidden columns + 1 for padding)
 
@@ -724,7 +709,6 @@ async function loadDataIntoNewSheet() {
 
             lastLoadedDataRange = {
                 sheetName: newSheet.name,
-                tableName: safeTableName,
                 dataRangeAddress: dataRange.address,
                 dataStartColZeroBased: 3,
                 rowCount: dataValues.length,
@@ -741,7 +725,6 @@ async function loadDataIntoNewSheet() {
         btnLoadDataCurrentSheet.disabled = false;
         btnLoadDataNewSheet.disabled = false;
     }
-    await createHistogram(currentSeriesName);
 }
 
 /* --------------------------------------------------------------------------
@@ -790,9 +773,9 @@ function promptForPivotTable() {
         `;
     }
 
-    const yearHtml = createCheckboxHtml("ptYear", "Years", canUseYear, checkYear);
-    const quarterHtml = createCheckboxHtml("ptQuarter", "Quarters", canUseQuarter, checkQuarter);
-    const monthHtml = createCheckboxHtml("ptMonth", "Months", canUseMonth, checkMonth);
+    const yearHtml = createCheckboxHtml("ptYear", "Year", canUseYear, checkYear);
+    const quarterHtml = createCheckboxHtml("ptQuarter", "Quarter", canUseQuarter, checkQuarter);
+    const monthHtml = createCheckboxHtml("ptMonth", "Month", canUseMonth, checkMonth);
 
     // 5. Construct the final output HTML
     outputEl.innerHTML = `
@@ -833,9 +816,9 @@ function promptForPivotTable() {
 async function generatePivotTable() {
     const aggFn = document.getElementById("ptAggregation").value;
     const groupFields = [];
-    if (document.getElementById("ptYear") && document.getElementById("ptYear").checked) groupFields.push("Years");
-    if (document.getElementById("ptQuarter") && document.getElementById("ptQuarter").checked) groupFields.push("Quarters");
-    if (document.getElementById("ptMonth") && document.getElementById("ptMonth").checked) groupFields.push("Months");
+    if (document.getElementById("ptYear") && document.getElementById("ptYear").checked) groupFields.push("Year");
+    if (document.getElementById("ptQuarter") && document.getElementById("ptQuarter").checked) groupFields.push("Quarter");
+    if (document.getElementById("ptMonth") && document.getElementById("ptMonth").checked) groupFields.push("Month");
 
     if (groupFields.length === 0) {
         alert("Please select at least one date grouping.");
@@ -849,45 +832,49 @@ async function generatePivotTable() {
     try {
         await Excel.run(async (context) => {
             const sheet = context.workbook.worksheets.getItem(lastLoadedDataRange.sheetName);
-            const table = sheet.tables.getItem(lastLoadedDataRange.tableName);
             
-            const colData = {};
-            groupFields.forEach(field => {
-                colData[field] = [];
-            });
+            let extendedCols = groupFields.length;
+            let dataStartCol = lastLoadedDataRange.dataStartColZeroBased;
+            let rowCount = lastLoadedDataRange.rowCount;
 
-            // Use native month abbreviations so Excel natively sorts them chronologically
-            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const extraDataValues = [];
+            extraDataValues.push(groupFields); // Write header
+
+            // Pre-format month names to make PivotTable sorting alphabetical
+            const monthNames = ["01 - Jan", "02 - Feb", "03 - Mar", "04 - Apr", "05 - May", "06 - Jun", "07 - Jul", "08 - Aug", "09 - Sep", "10 - Oct", "11 - Nov", "12 - Dec"];
 
             currentData.forEach(r => {
                 const parts = r.date.split("-");
+                const rowVals = [];
                 if(parts.length === 3) {
                     const year = parseInt(parts[0], 10);
                     const month = parseInt(parts[1], 10);
-                    const quarter = "Qtr" + Math.ceil(month / 3);
+                    const quarter = "Q" + Math.ceil(month / 3);
                     const monthName = monthNames[month - 1]; 
 
                     groupFields.forEach(field => {
-                        if (field === "Years") colData[field].push([year]);
-                        else if (field === "Quarters") colData[field].push([quarter]);
-                        else if (field === "Months") colData[field].push([monthName]);
+                        if (field === "Year") rowVals.push(year);
+                        else if (field === "Quarter") rowVals.push(quarter);
+                        else if (field === "Month") rowVals.push(monthName);
                     });
                 } else {
-                    groupFields.forEach(field => colData[field].push([""]));
+                    groupFields.forEach(() => rowVals.push(""));
                 }
+                extraDataValues.push(rowVals);
             });
 
-            groupFields.forEach(field => {
-                let newCol = table.columns.add(null, null, field);
-                newCol.getDataBodyRange().values = colData[field];
-                newCol.getRange().columnHidden = true;
-            });
+            const extraRange = sheet.getRangeByIndexes(0, dataStartCol + 2, rowCount, extendedCols);
+            extraRange.values = extraDataValues;
+            extraRange.columnHidden = true; // Hides the generated columns so you don't have to see them
+            
+            const fullDataRange = sheet.getRangeByIndexes(0, dataStartCol, rowCount, 2 + extendedCols);
+            fullDataRange.load("address");
             
             const targetCell = sheet.getRange(lastLoadedDataRange.pivotTargetAddress);
             await context.sync();
 
             const safeName = "Pivot_" + lastLoadedDataRange.seriesId.replace(/[^a-zA-Z0-9]/g, "") + "_" + Math.floor(Math.random() * 1000);
-            const pivotTable = sheet.pivotTables.add(safeName, lastLoadedDataRange.tableName, targetCell);
+            const pivotTable = sheet.pivotTables.add(safeName, fullDataRange, targetCell);
 
             groupFields.forEach(field => {
                 pivotTable.rowHierarchies.add(pivotTable.hierarchies.getItem(field));
@@ -895,7 +882,7 @@ async function generatePivotTable() {
 
             const dataHierarchy = pivotTable.dataHierarchies.add(pivotTable.hierarchies.getItem(lastLoadedDataRange.seriesId));
             dataHierarchy.summarizeBy = aggFn;
-            pivotTable.layout.layoutType = "Compact";
+            pivotTable.layout.layoutType = "Tabular";
 
             await context.sync();
         });
@@ -991,36 +978,4 @@ function viewSessionBookmarks() {
     });
     outputEl.appendChild(frag);
     infoEl.innerHTML = "";
-}
-
-async function createHistogram(currentSeriesName) {
-    await Excel.run(async (context) => {
-        let sheet = context.workbook.worksheets.getActiveWorksheet();
-        // Deletes any existing charts to avoid clutter if user loads multiple series
-        sheet.charts.load("items");
-        await context.sync();
-        sheet.charts.items.forEach(chart => {
-            chart.delete();
-        }); 
-        
-        if (!lastLoadedDataRange || !lastLoadedDataRange.tableName) return;
-        
-        let table = sheet.tables.getItem(lastLoadedDataRange.tableName);
-        let valueColumn = table.columns.getItemAt(1).getDataBodyRange();
-        
-        // Create histogram
-        let chart = sheet.charts.add(Excel.ChartType.histogram, valueColumn, Excel.ChartSeriesBy.columns);
-        // Chart title using series name
-        chart.title.text = `${currentSeriesName} Histogram`;
-        // Cell position
-        chart.setPosition("A15", "D30");
-        // Y-axis title
-        chart.axes.valueAxis.title.text = "Frequency";
-        chart.axes.valueAxis.title.visible = true;
-        chart.axes.categoryAxis.title.text = "Value Range";
-        chart.axes.categoryAxis.title.visible = true;
-        // Improve X-axis readability
-        chart.axes.categoryAxis.format.font.size = 9;
-        await context.sync();
-    });
 }
