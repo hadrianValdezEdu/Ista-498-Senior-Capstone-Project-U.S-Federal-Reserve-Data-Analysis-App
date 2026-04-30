@@ -6,13 +6,17 @@ from fastapi import HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import requests # Import requests to catch its exceptions
 from search import Search
+import os
 
 # --------------------------------------------------------------------------
 # APP INITIALIZATION
 # --------------------------------------------------------------------------
 
 app = FastAPI(title="FRED API Proxy", description="Proxy for FRED API to fetch economic data.")
-search = Search(api_key="")
+
+# WARNING: Move this key to a safe .env file in the future.
+FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
+search = Search(api_key=FRED_API_KEY)
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,9 +47,9 @@ def categories(category_id: int):
 # --------------------------------------------------------------------------
 
 @app.get("/series/{category_id}")
-def series(category_id: int):
+def series(category_id: int, order_by: str = Query("popularity")):
     try:
-        df = search.get_series_df(category_id)
+        df = search.get_series_df(category_id, order_by=order_by)
         return df.to_dict(orient="records")
     except requests.exceptions.HTTPError as e:
         print(f"Error fetching series for category {category_id}: {e}")

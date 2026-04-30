@@ -29,7 +29,25 @@
                 placeholder="Enter Series ID or FRED URL"
             />
             <button id="btnSearch"><strong>Search</strong></button>
-            <button id="connorsbtn" onclick="window.location.href='https://www.youtube.com/watch?v=oHg5SJYRHA0';">ML Button</button>
+            <button id="connorsbtn" onclick="window.open('https://www.youtube.com/watch?v=oHg5SJYRHA0', '_blank');">ML Button</button>
+        </div>
+
+        <div id="sort-container" style="margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 10px;">
+            <label for="seriesSort">Sort Series By:</label>
+            <select id="seriesSort" style="padding: 4px; border-radius: 4px;">
+                <option value="popularity">Popularity</option>
+                <option value="last_updated">Updated</option>
+                <option value="observation_end">OBS End</option>
+                <option value="observation_start">OBS Start</option>
+                <option value="title">Title</option>
+                <option value="frequency">Frequency</option>
+                <option value="units">Units</option>
+                <option value="seasonal_adjustment">Seasonal Adjustment</option>
+            </select>
+            <div style="margin-left: 15px;">
+                <input type="checkbox" id="toggleDiscontinued" style="margin-right: 5px;">
+                <label for="toggleDiscontinued">Show Discontinued</label>
+            </div>
         </div>
 
         <!-- Main action buttons -->

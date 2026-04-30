@@ -51,17 +51,17 @@ class Search():
     # SERIES RETRIEVAL
     # ----------------------------------------------------------------------
 
-    def get_series(self, category_id):
+    def get_series(self, category_id, order_by="popularity"):
         url = (
             "https://api.stlouisfed.org/fred/category/series"
-            f"?category_id={category_id}&api_key={self.api_key}&file_type=json&limit=1000"
+            f"?category_id={category_id}&api_key={self.api_key}&file_type=json&limit=1000&order_by={order_by}&sort_order=desc"
         )
         response = requests.get(url)
         response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
         return response.json()
 
-    def get_series_df(self, category_id):
-        data = self.get_series(category_id)
+    def get_series_df(self, category_id, order_by="popularity"):
+        data = self.get_series(category_id, order_by=order_by)
         series_lst = data.get("seriess", [])
 
         rows = []
@@ -87,18 +87,16 @@ class Search():
 
         series_list = data.get("seriess", [])
 
-        rows = []
+        # Process the list to rename 'id' to 'series_id' for frontend consistency
+        # and return all available metadata fields.
+        processed_list = []
         for s in series_list:
-            rows.append({
-                "series_id": s["id"],
-                "title": s["title"],
-                "frequency": s["frequency"],
-                "units": s["units"],
-                "seasonal_adjustment": s["seasonal_adjustment"],
-                "observation_start": s.get("observation_start")
-            })
+            info_copy = s.copy()
+            if 'id' in info_copy:
+                info_copy['series_id'] = info_copy.pop('id')
+            processed_list.append(info_copy)
 
-        return rows
+        return processed_list
 
     # ----------------------------------------------------------------------
     # DATA RETRIEVAL
@@ -130,7 +128,7 @@ class Search():
         df = df[["date", "value"]]
 
         # Replace numpy's Not a Number (NaN) with Python's None, which is JSON compliant.
-        df.replace({np.nan: None}, inplace=True)
+        df = df.replace({np.nan: None})
 
         return df
 

@@ -342,3 +342,17 @@ b {
     justify-content: center;
     align-items: center;
 }
+
+/* Styling for discontinued series buttons */
+.discontinued-series {
+    background-color: #f0f0f0; /* Light grey background */
+    color: #888; /* Grey text */
+    text-decoration: line-through; /* Strikethrough */
+    font-style: italic;
+}
+
+.discontinued-series:hover {
+    background-color: #e0e0e0; /* Slightly darker grey on hover */
+    cursor: not-allowed; /* Indicate it's discontinued */
+}
+}

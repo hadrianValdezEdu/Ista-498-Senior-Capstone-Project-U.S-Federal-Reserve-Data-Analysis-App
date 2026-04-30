@@ -24,12 +24,16 @@ function loadCacheFromLocalStorage(key) {
 
 function saveCacheToLocalStorage(key, cacheMap) {
     const arrayToStore = Array.from(cacheMap.entries());
-    localStorage.setItem(key, JSON.stringify(arrayToStore));
+    try {
+        localStorage.setItem(key, JSON.stringify(arrayToStore));
+    } catch (e) {
+        console.warn(`Could not save ${key} to localStorage (quota may be exceeded):`, e);
+    }
 }
 
 let categoryCache = loadCacheFromLocalStorage('categoryCache');
 let seriesCache = loadCacheFromLocalStorage('seriesCache');
-let dataCache = loadCacheFromLocalStorage('dataCache');
+let dataCache = new Map(); // Keep data in memory only to prevent 5MB localStorage QuotaExceededError
 let navStack = [{ type: 'main' }];
 
 let currentSeriesId = null;
@@ -59,7 +63,11 @@ Office.onReady(() => {
     btnViewBookmarks = document.getElementById("btnViewBookmarks");
 
     document.getElementById("btnGetCategories").onclick = loadRootCategories;
-    document.getElementById("btnStatisticalAnalysis").onclick = showStatisticalAnalysisMenu;
+    const btnStats = document.getElementById("btnStatisticalAnalysis");
+    if (btnStats) {
+        btnStats.textContent = "Time Series Decomposition";
+        btnStats.onclick = performTimeSeriesDecomposition;
+    }
     document.getElementById("btnSearch").onclick = textSearch;
     document.getElementById("btnBack").onclick = goBack;
     btnLoadDataCurrentSheet.onclick = loadDataIntoCurrentSheet;
@@ -68,10 +76,19 @@ Office.onReady(() => {
     btnViewBookmarks.onclick = viewSessionBookmarks;
 
     document.getElementById("btnResetCache").onclick = resetCache;
-    document.getElementById("btnStatisticalAnalysis").disabled = true;
+    
+    // Add listener for sort dropdown
+    document.getElementById("seriesSort").onchange = () => {
+        const lastState = navStack[navStack.length - 1];
+        if (lastState && lastState.type === 'categoryList') {
+            // Re-trigger the category click to refresh list with new sorting
+            handleCategoryClick(lastState.id);
+        }
+    };
 
     // Use event delegation for dynamic buttons
     outputEl.addEventListener("click", onOutputClick);
+    updateStatisticalAnalysisButton();
 });
 
 /* --------------------------------------------------------------------------
@@ -119,13 +136,14 @@ async function getSubcategories(categoryId) {
     return data;
 }
 
-async function getSeries(categoryId) {
-    if (seriesCache.has(String(categoryId))) {
-        return seriesCache.get(String(categoryId));
+async function getSeries(categoryId, orderBy = "popularity") {
+    const cacheKey = `${categoryId}_${orderBy}`;
+    if (seriesCache.has(cacheKey)) {
+        return seriesCache.get(cacheKey);
     }
-    const raw = await fetchJSON(`${BACKEND_BASE_URL}/series/${categoryId}`);
+    const raw = await fetchJSON(`${BACKEND_BASE_URL}/series/${categoryId}?order_by=${orderBy}`);
     const data = normalizeArrayResponse(raw, ['series', 'results', 'data']);
-    seriesCache.set(String(categoryId), data);
+    seriesCache.set(cacheKey, data);
     saveCacheToLocalStorage('seriesCache', seriesCache);
     return data;
 }
@@ -137,7 +155,6 @@ async function getData(seriesId) {
     const raw = await fetchJSON(`${BACKEND_BASE_URL}/data/${seriesId}`);
     const data = normalizeArrayResponse(raw, ['data', 'observations', 'results']);
     dataCache.set(String(seriesId), data);
-    saveCacheToLocalStorage('dataCache', dataCache);
     return data;
 }
 
@@ -151,10 +168,13 @@ function updateBackButton() {
 }
 
 function updateStatisticalAnalysisButton() {
-    const isDisabled = !currentData || currentData.length === 0;
-    document.getElementById("btnStatisticalAnalysis").disabled = isDisabled;
-    btnLoadDataCurrentSheet.disabled = isDisabled;
-    btnLoadDataNewSheet.disabled = isDisabled;
+    // The decomposition button is now independent of loaded data and works on selection.
+    // It is enabled by default and only disabled during the operation itself.
+    document.getElementById("btnStatisticalAnalysis").disabled = false;
+
+    const isDataReadyForLoad = currentData && currentData.length > 0;
+    btnLoadDataCurrentSheet.disabled = !isDataReadyForLoad;
+    btnLoadDataNewSheet.disabled = !isDataReadyForLoad;
     updateBookmarkButtons();
 }
 
@@ -252,21 +272,29 @@ async function handleCategoryClick(categoryId) {
     }
 
     try {
-        const subcats = await getSubcategories(categoryId);
-        if (subcats && subcats.length > 0) {
-            renderCategories(subcats);
-            infoEl.innerHTML = "";
-        } else {
-            // No subcategories, try series
-            const seriesList = await getSeries(categoryId);
+            const orderBy = document.getElementById("seriesSort").value;
+
+            const [subcats, seriesList] = await Promise.all([
+                getSubcategories(categoryId).catch(err => { console.warn("Subcategories fetch error:", err); return []; }),
+                getSeries(categoryId, orderBy).catch(err => { console.warn("Series fetch error:", err); return []; })
+            ]);
+
+            outputEl.innerHTML = ""; // Clear immediately before rendering to prevent double-render race condition
+
+            let hasContent = false;
+            if (subcats && subcats.length > 0) {
+                renderCategories(subcats);
+                hasContent = true;
+            }
             if (seriesList && seriesList.length > 0) {
                 renderSeries(seriesList);
-                infoEl.innerHTML = "";
-            } else {
-                outputEl.innerHTML = "<p>No subcategories or series were found for this category.</p>";
-                infoEl.innerHTML = "";
-            }
+                hasContent = true;
         }
+
+            if (!hasContent) {
+                outputEl.innerHTML = "<p>No subcategories or series were found for this category.</p>";
+            }
+            infoEl.innerHTML = "";
     } catch (error) {
         console.error("Category click error:", error);
         infoEl.innerHTML = `<p>Could not load data for this category. It may be too large or temporarily unavailable.</p>`;
@@ -328,7 +356,8 @@ async function goBack() {
     currentData = null;
     btnLoadDataCurrentSheet.disabled = true;
     btnLoadDataNewSheet.disabled = true;
-    document.getElementById("btnStatisticalAnalysis").disabled = true;
+
+    const orderBy = document.getElementById("seriesSort").value;
 
     try {
         switch (previousState.type) {
@@ -336,16 +365,25 @@ async function goBack() {
                 // nothing to render
                 break;
             case 'categoryList':
-                const subcats = await getSubcategories(previousState.id);
+                const [subcats, seriesList] = await Promise.all([
+                    getSubcategories(previousState.id).catch(err => { console.warn("Subcategories fetch error:", err); return []; }),
+                    getSeries(previousState.id, orderBy).catch(err => { console.warn("Series fetch error:", err); return []; })
+                ]);
+
+                outputEl.innerHTML = ""; // Clear immediately before rendering to prevent double-render race condition
+
+                let hasContent = false;
                 if (subcats && subcats.length > 0) {
                     renderCategories(subcats);
-                } else {
-                    const seriesList = await getSeries(previousState.id);
-                    if (seriesList && seriesList.length > 0) {
-                        renderSeries(seriesList);
-                    } else {
-                        outputEl.innerHTML = "<p>No results were found for this category.</p>";
-                    }
+                    hasContent = true;
+                }
+                if (seriesList && seriesList.length > 0) {
+                    renderSeries(seriesList);
+                    hasContent = true;
+                }
+
+                if (!hasContent) {
+                    outputEl.innerHTML = "<p>No results were found for this category.</p>";
                 }
                 break;
             // other states can be handled if needed
@@ -375,6 +413,8 @@ async function textSearch() {
     try {
         const encodedInput = encodeURIComponent(input);
         const result = await fetchJSON(`${BACKEND_BASE_URL}/logic/search?q=${encodedInput}`);
+
+        outputEl.innerHTML = ""; // Clear immediately before rendering to prevent double-render race condition
 
         if (result.type === "series") {
             const infoList = normalizeArrayResponse(result.info || result, ['info', 'results']);
@@ -421,7 +461,12 @@ async function textSearch() {
 -------------------------------------------------------------------------- */
 
 function renderCategories(categories) {
-    outputEl.innerHTML = "<h3>Select a Category</h3>";
+    if (!categories || categories.length === 0) return;
+
+    const heading = document.createElement("h3");
+    heading.textContent = "Categories";
+    outputEl.appendChild(heading);
+
     const frag = document.createDocumentFragment();
 
     categories.forEach(cat => {
@@ -438,7 +483,12 @@ function renderCategories(categories) {
 }
 
 function renderSeries(seriesList) {
-    outputEl.innerHTML = "<h3>Select a Series</h3>";
+    if (!seriesList || seriesList.length === 0) return;
+
+    const heading = document.createElement("h3");
+    heading.textContent = "Series";
+    outputEl.appendChild(heading);
+
     const frag = document.createDocumentFragment();
 
     seriesList.forEach(s => {
@@ -461,13 +511,19 @@ function renderSeriesInfo(infoList) {
     infoList.forEach(info => {
         const div = document.createElement("div");
         div.className = "series-info";
-        div.innerHTML = `
-            <strong>${info.title}</strong><br>
-            ID: ${info.series_id}<br>
-            Frequency: ${info.frequency}<br>
-            Units: ${info.units}<br>
-            Seasonal Adjustment: ${info.seasonal_adjustment}
-        `;
+
+        let htmlContent = '';
+        if (info.title) {
+            htmlContent += `<strong>${info.title}</strong><br><br>`;
+        }
+
+        for (const key in info) {
+            if (Object.prototype.hasOwnProperty.call(info, key) && key !== 'title' && info[key]) {
+                const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                htmlContent += `<strong>${label}:</strong> ${info[key]}<br>`;
+            }
+        }
+        div.innerHTML = htmlContent;
         frag.appendChild(div);
     });
 
@@ -475,99 +531,182 @@ function renderSeriesInfo(infoList) {
 }
 
 /* --------------------------------------------------------------------------
-   STATISTICAL ANALYSIS (unchanged except for safety checks)
+   STATISTICAL ANALYSIS
 -------------------------------------------------------------------------- */
 
-async function showStatisticalAnalysisMenu() {
-    if (!currentData || currentData.length === 0) {
-        infoEl.innerHTML = "<p>Please load data for a series first to enable statistical analysis.</p>";
-        return;
-    }
+async function performTimeSeriesDecomposition() {
+    infoEl.innerHTML = `<p>Performing Time Series Decomposition on selected data...</p>`;
+    document.getElementById("btnStatisticalAnalysis").disabled = true;
 
-    infoEl.innerHTML = `<p>Statistical Analysis for Series: <strong>${currentSeriesId}</strong></p>`;
-    outputEl.innerHTML = "<h3>Select a Statistical Tool</h3>";
-
-    navStack.push({ type: 'statisticalMenu' });
-
-    const frag = document.createDocumentFragment();
-
-    const descriptiveStatsButton = document.createElement("button");
-    descriptiveStatsButton.type = "button";
-    descriptiveStatsButton.className = "buttonStyle";
-    descriptiveStatsButton.textContent = "Descriptive Statistics";
-    descriptiveStatsButton.onclick = calculateDescriptiveStatistics;
-    frag.appendChild(descriptiveStatsButton);
-
-    outputEl.appendChild(frag);
-    updateBackButton();
-}
-
-async function calculateDescriptiveStatistics() {
     try {
-        await Excel.run(async context => {
+        await Excel.run(async (context) => {
             const sheet = context.workbook.worksheets.getActiveWorksheet();
-            const selectedRange = context.workbook.getSelectedRange();
-            selectedRange.load("values, rowIndex");
+            const range = context.workbook.getSelectedRange();
+            
+            const tables = sheet.tables.load("items/name");
             await context.sync();
 
-            let values = [];
-
-            if (!Array.isArray(selectedRange.values) || selectedRange.values.length === 0) {
-                infoEl.innerHTML = "<p>Please select a range of cells containing numeric data for statistical analysis.</p>";
-                return;
-            }
-
-            selectedRange.values.forEach(row => {
-                if (Array.isArray(row)) {
-                    row.forEach(cellValue => {
-                        if (typeof cellValue === 'number' && !isNaN(cellValue)) {
-                            values.push(cellValue);
-                        }
-                    });
+            let targetTable = null;
+            for (const table of tables.items) {
+                const tableRange = table.getRange();
+                const intersection = tableRange.getIntersectionOrNullObject(range);
+                intersection.load("isNullObject");
+                await context.sync();
+                if (!intersection.isNullObject) {
+                    targetTable = table;
+                    break;
                 }
-            });
-
-            if (values.length === 0) {
-                infoEl.innerHTML = "<p>Please select a range of cells containing numeric data for statistical analysis.</p>";
-                return;
             }
 
-            const sum = values.reduce((a, b) => a + b, 0);
-            const mean = sum / values.length;
-            const sortedValues = [...values].sort((a, b) => a - b);
-            const mid = Math.floor(sortedValues.length / 2);
-            const median = sortedValues.length % 2 === 0 ? (sortedValues[mid - 1] + sortedValues[mid]) / 2 : sortedValues[mid];
-            const min = Math.min(...values);
-            const max = Math.max(...values);
-            const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-            const stdDev = Math.sqrt(variance);
-            const count = values.length;
+            if (!targetTable) {
+                throw new Error("Could not find an Excel Table in your selection. Please select any cell inside the loaded data table.");
+            }
 
-            const results = [
-                ["Count", count],
-                ["Mean", mean.toFixed(4)],
-                ["Median", median.toFixed(4)],
-                ["Standard Deviation", stdDev.toFixed(4)],
-                ["Min", min.toFixed(4)],
-                ["Max", max.toFixed(4)]
-            ];
-
-            const outputExcelRow = selectedRange.rowIndex + 1;
-            const outputRange = sheet.getRange(`C${outputExcelRow}:D${outputExcelRow + results.length - 1}`);
-            outputRange.values = results;
-            outputRange.format.autofitColumns();
+            // Load the table's full range and values to ensure we get everything perfectly
+            const fullTableRange = targetTable.getRange().load("values, rowCount, columnCount");
+            targetTable.load("name, columns/items/name");
             await context.sync();
 
-            infoEl.innerHTML = `<p>Descriptive Statistics calculated and placed in Excel starting from C${outputExcelRow}.</p>`;
+            const tableName = targetTable.name;
+            const tableValues = fullTableRange.values;
+            
+            if (fullTableRange.columnCount < 2) {
+                throw new Error("The selected table does not have enough columns to perform decomposition.");
+            }
+
+            const headers = tableValues[0];
+            const seriesIdFromHeader = headers[1]; // Value column is 2nd column
+            const dataRows = tableValues.slice(1);
+
+            if (!seriesIdFromHeader || typeof seriesIdFromHeader !== 'string') {
+                throw new Error("Could not identify the Series ID from the header of the second column in the table.");
+            }
+
+            // Fetch series info to get frequency and seasonal adjustment
+            const seriesInfoList = await fetchJSON(`${BACKEND_BASE_URL}/info/${seriesIdFromHeader}`);
+            const info = Array.isArray(seriesInfoList) && seriesInfoList.length > 0 ? seriesInfoList[0] : {};
+            
+            const freq = (info && info.frequency) ? info.frequency.toLowerCase() : "";
+            const isSA = (info && info.seasonal_adjustment)
+                ? info.seasonal_adjustment.toLowerCase().includes("seasonally adjusted") &&
+                  !info.seasonal_adjustment.toLowerCase().includes("not seasonally adjusted")
+                : false;
+
+            let L = 1;
+            if (freq.includes("month")) L = 12;
+            else if (freq.includes("quarter")) L = 4;
+            else if (freq.includes("week")) L = 52;
+            else if (freq.includes("day") || freq.includes("daily")) L = 365;
+
+            const useSeasonal = !isSA && L > 1;
+
+            const values = dataRows.map(row => {
+                const parsed = parseFloat(row[1]);
+                return isNaN(parsed) ? 0 : parsed;
+            });
+            const n = values.length;
+
+            function getCenteredMA(arr, span) {
+                const result = new Array(arr.length).fill(null);
+                if (span <= 1) return arr;
+                let half = Math.floor(span / 2);
+                for (let i = half; i < arr.length - half; i++) {
+                    let sum = 0;
+                    if (span % 2 === 0) {
+                        for (let j = i - half + 1; j < i + half; j++) sum += arr[j];
+                        sum += (arr[i - half] + arr[i + half]) / 2;
+                        result[i] = sum / span;
+                    } else {
+                        for (let j = i - half; j <= i + half; j++) sum += arr[j];
+                        result[i] = sum / span;
+                    }
+                }
+                return result;
+            }
+
+            const maShort = getCenteredMA(values, Math.max(L, 3));
+            const maLong = getCenteredMA(values, Math.max(L * 5, 5));
+
+            const trend = new Array(n).fill(null);
+            const cyclical = new Array(n).fill(null);
+            const seasonal = new Array(n).fill(0);
+            const residual = new Array(n).fill(null);
+
+            for (let i = 0; i < n; i++) { if (maLong[i] !== null) trend[i] = maLong[i]; if (maShort[i] !== null && maLong[i] !== null) cyclical[i] = maShort[i] - maLong[i]; }
+
+            if (useSeasonal) {
+                const seasonSums = new Array(L).fill(0);
+                const seasonCounts = new Array(L).fill(0);
+                for (let i = 0; i < n; i++) { if (maShort[i] !== null) { seasonSums[i % L] += (values[i] - maShort[i]); seasonCounts[i % L]++; } }
+                let seasonAvg = seasonSums.map((s, idx) => seasonCounts[idx] > 0 ? s / seasonCounts[idx] : 0);
+                let meanSeason = seasonAvg.reduce((a,b)=>a+b, 0) / L;
+                seasonAvg = seasonAvg.map(s => s - meanSeason);
+                for (let i = 0; i < n; i++) seasonal[i] = seasonAvg[i % L];
+            }
+
+            for (let i = 0; i < n; i++) { if (maShort[i] !== null) { residual[i] = values[i] - maShort[i] - (useSeasonal ? seasonal[i] : 0); } }
+
+            const existingCols = new Set(targetTable.columns.items.map(c => c.name));
+                
+            const trendVals = [["Trend"], ...trend.map(v => [v === null ? "" : v])];
+            const cyclicalVals = [["Cyclical"], ...cyclical.map(v => [v === null ? "" : v])];
+            const seasonalVals = [["Seasonal"], ...seasonal.map(v => [v === null ? "" : v])];
+            const residualVals = [["Residual"], ...residual.map(v => [v === null ? "" : v])];
+
+            let colsToAddCount = 0;
+            if (!existingCols.has("Trend")) colsToAddCount++;
+            if (!existingCols.has("Cyclical")) colsToAddCount++;
+            if (useSeasonal && !existingCols.has("Seasonal")) colsToAddCount++;
+            if (!existingCols.has("Residual")) colsToAddCount++;
+
+            if (colsToAddCount > 0) {
+                // Shift cells right by inserting whole columns to prevent "move cells in a table" errors 
+                const lastTableCol = targetTable.getRange().getLastColumn();
+                const insertRange = lastTableCol.getOffsetRange(0, 1).getEntireColumn().getResizedRange(0, colsToAddCount - 1);
+                insertRange.insert(Excel.InsertShiftDirection.right);
+                await context.sync();
+                
+                // RE-FETCH TABLE: Inserting entire columns invalidates the previous targetTable reference.
+                targetTable = sheet.tables.getItem(tableName);
+                await context.sync();
+            }
+
+            if (!existingCols.has("Trend")) targetTable.columns.add(null, trendVals, "Trend");
+            if (!existingCols.has("Cyclical")) targetTable.columns.add(null, cyclicalVals, "Cyclical");
+            if (useSeasonal && !existingCols.has("Seasonal")) targetTable.columns.add(null, seasonalVals, "Seasonal");
+            if (!existingCols.has("Residual")) targetTable.columns.add(null, residualVals, "Residual");
+
+            const newTableRange = targetTable.getRange();
+            newTableRange.load("columnIndex, rowIndex, rowCount");
+            await context.sync();
+
+            const chartRange = newTableRange;
+            const chart = sheet.charts.add(Excel.ChartType.line, chartRange, Excel.ChartSeriesBy.columns);
+            chart.title.text = `${info.title || seriesIdFromHeader} - Decomposition`;
+
+            // Position chart under the datasets' notes and aligned with the metadata
+            const chartStartCol = newTableRange.columnIndex >= 4 ? newTableRange.columnIndex - 4 : 0;
+            const chartStartRow = newTableRange.rowIndex + 85; 
+            
+            chart.setPosition(sheet.getCell(chartStartRow, chartStartCol), sheet.getCell(chartStartRow + 15, chartStartCol + 3));
+
+            await context.sync();
         });
+
+        infoEl.innerHTML = `<p style="color: green;">Time Series Decomposition completed! Columns added to your data table and chart generated.</p>`;
     } catch (error) {
-        console.error("Descriptive statistics error:", error);
-        infoEl.innerHTML = `<p>Error performing descriptive statistics: ${error.message || error}</p>`;
+        console.error("Decomposition error:", error);
+        if (error.debugInfo) {
+            console.error("Excel API Error:", error.debugInfo);
+        }
+        infoEl.innerHTML = `<p>Error performing decomposition: ${error.message || error}</p>`;
+    } finally {
+        document.getElementById("btnStatisticalAnalysis").disabled = false;
     }
 }
 
 /* --------------------------------------------------------------------------
-   EXCEL INSERTION FUNCTIONS (unchanged except for small safety checks)
+   EXCEL INSERTION FUNCTIONS
 -------------------------------------------------------------------------- */
 
 async function loadDataIntoCurrentSheet() {
@@ -586,10 +725,13 @@ async function loadDataIntoCurrentSheet() {
         }
         const metadata = lastLoadedSeries.info;
 
+        // Extract notes content separately
+        const notesContent = metadata.notes || null;
+
         await Excel.run(async (context) => {
             const sheet = context.workbook.worksheets.getActiveWorksheet();
             const usedRange = sheet.getUsedRangeOrNullObject();
-            usedRange.load("columnCount, isNullObject");
+            usedRange.load("columnIndex, columnCount, isNullObject, width"); // Load width for dynamic sizing
             sheet.load("name"); // Load the name property of the sheet object
             await context.sync();
 
@@ -597,18 +739,35 @@ async function loadDataIntoCurrentSheet() {
             if (usedRange.isNullObject) {
                 startColumnIndex = 1;
             } else {
-                startColumnIndex = usedRange.columnCount + 2;
+                // Ensure enough space from the last used column
+                startColumnIndex = usedRange.columnIndex + usedRange.columnCount + 2; 
             }
 
-            const metadataLabels = [
-                "Series ID:", "Title:", "Frequency:", "Units:", "Seasonal Adjustment:", "Observation Start:"
-            ];
-            const metadataValues = [
-                metadata.series_id, metadata.title, metadata.frequency, metadata.units,
-                metadata.seasonal_adjustment, metadata.observation_start
-            ];
-            const metadataArray = metadataLabels.map((label, index) => [label, metadataValues[index] || ""]);
+            const metadataArray = [];
+            if (metadata) { // Only process if metadata exists
+                // Define a preferred order for important fields to display them at the top
+                const preferredOrder = [
+                    'series_id', 'title', 'frequency', 'units', 'seasonal_adjustment', 
+                    'observation_start', 'observation_end', 'last_updated', 'popularity'
+                ];
 
+                // Function to format key into a readable label
+                const formatLabel = (key) => key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) + ':';
+
+                // Add preferred fields first, in order
+                preferredOrder.forEach(key => {
+                    if (Object.prototype.hasOwnProperty.call(metadata, key) && metadata[key]) {
+                        metadataArray.push([formatLabel(key), String(metadata[key])]);
+                    }
+                });
+
+                // Add remaining fields that are not in the preferred list
+                for (const key in metadata) { // Iterate over all properties in metadata
+                    if (Object.prototype.hasOwnProperty.call(metadata, key) && !preferredOrder.includes(key) && key !== 'notes' && metadata[key]) {
+                        metadataArray.push([formatLabel(key), String(metadata[key])]);
+                    }
+                }
+            }
             const dataValues = [["Date", currentSeriesId]];
             currentData.forEach(r => {
                 dataValues.push([r.date, r.value]);
@@ -620,7 +779,7 @@ async function loadDataIntoCurrentSheet() {
             metadataRange.format.autofitColumns();
             metadataRange.getCell(0, 0).getResizedRange(metadataArray.length - 1, 0).format.font.bold = true;
 
-            const dataStartColZeroBased = metadataStartColZeroBased + 3;
+            const dataStartColZeroBased = metadataStartColZeroBased + 4; // 2 columns for metadata + 2 empty columns
             const dataRange = sheet.getRangeByIndexes(0, dataStartColZeroBased, dataValues.length, 2); // 2 columns: Date, Value
             dataRange.values = dataValues;
             dataRange.format.autofitColumns();
@@ -646,10 +805,17 @@ async function loadDataIntoCurrentSheet() {
                 dataStartColZeroBased: dataStartColZeroBased,
                 rowCount: dataValues.length,
                 pivotTargetAddress: pivotTargetCell.address,
-                seriesId: currentSeriesId
+                seriesId: currentSeriesId,
+                metadataStartColZeroBased: metadataStartColZeroBased, // Start column of the metadata table
+                metadataRowCount: metadataArray.length, // Number of rows in the metadata table
+                notesContent: notesContent // Store notes content for later use
             };
         });
 
+        await createHistogram(currentSeriesName);
+        await createLineChart(currentSeriesName);
+        await createBoxPlot(currentSeriesName);
+        await createNotesTextBox(notesContent); // Create the text box after all charts
         promptForPivotTable();
     } catch (error) {
         console.error("Error loading data into current sheet:", error);
@@ -658,7 +824,6 @@ async function loadDataIntoCurrentSheet() {
         btnLoadDataCurrentSheet.disabled = false;
         btnLoadDataNewSheet.disabled = false;
     }
-    await createHistogram(currentSeriesName);
 }
 
 async function loadDataIntoNewSheet() {
@@ -676,24 +841,55 @@ async function loadDataIntoNewSheet() {
             throw new Error("Could not find cached metadata. Please search for the series again.");
         }
         const metadata = lastLoadedSeries.info;
+        
+        // Extract notes content separately
+        const notesContent = metadata.notes || null;
 
         await Excel.run(async (context) => {
             let sheetName = currentSeriesId.replace(/[^a-zA-Z0-9 ]/g, "").substring(0, 31).trim();
             if (sheetName.length === 0) sheetName = "FRED_Data";
-            const newSheet = context.workbook.worksheets.add(sheetName);
+            
+            let uniqueSheetName = sheetName;
+            let counter = 1;
+            while (true) {
+                let existingSheet = context.workbook.worksheets.getItemOrNullObject(uniqueSheetName);
+                await context.sync();
+                if (existingSheet.isNullObject) {
+                    break;
+                }
+                uniqueSheetName = sheetName.substring(0, 31 - String(counter).length - 1) + "_" + counter;
+                counter++;
+            }
+            const newSheet = context.workbook.worksheets.add(uniqueSheetName);
             newSheet.activate(); // Activate the new sheet
             newSheet.load("name"); // Load the name property of the new sheet
             await context.sync(); // Sync to ensure newSheet.name is loaded
 
-            const metadataLabels = [
-                "Series ID:", "Title:", "Frequency:", "Units:", "Seasonal Adjustment:", "Observation Start:"
-            ];
-            const metadataValues = [
-                metadata.series_id, metadata.title, metadata.frequency, metadata.units,
-                metadata.seasonal_adjustment, metadata.observation_start
-            ];
-            const metadataArray = metadataLabels.map((label, index) => [label, metadataValues[index] || ""]);
+            const metadataArray = [];
+            if (metadata) {
+                // Define a preferred order for important fields to display them at the top
+                const preferredOrder = [
+                    'series_id', 'title', 'frequency', 'units', 'seasonal_adjustment', 
+                    'observation_start', 'observation_end', 'last_updated', 'popularity', 'notes'
+                ];
 
+                // Function to format key into a readable label
+                const formatLabel = (key) => key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) + ':';
+
+                // Add preferred fields first, in order
+                preferredOrder.forEach(key => {
+                    if (Object.prototype.hasOwnProperty.call(metadata, key) && metadata[key]) {
+                        metadataArray.push([formatLabel(key), String(metadata[key])]);
+                    }
+                });
+
+                // Add remaining fields that are not in the preferred list
+                for (const key in metadata) {
+                    if (Object.prototype.hasOwnProperty.call(metadata, key) && !preferredOrder.includes(key) && metadata[key]) {
+                        metadataArray.push([formatLabel(key), String(metadata[key])]);
+                    }
+                }
+            }
             const dataValues = [["Date", currentSeriesId]];
             currentData.forEach(r => {
                 dataValues.push([r.date, r.value]);
@@ -704,7 +900,7 @@ async function loadDataIntoNewSheet() {
             metadataRange.format.autofitColumns();
             metadataRange.getCell(0, 0).getResizedRange(metadataArray.length - 1, 0).format.font.bold = true;
 
-            const dataRange = newSheet.getRangeByIndexes(0, 3, dataValues.length, 2); // 2 columns: Date, Value
+            const dataRange = newSheet.getRangeByIndexes(0, 4, dataValues.length, 2); // 2 columns for metadata + 2 empty columns
             dataRange.values = dataValues;
             dataRange.format.autofitColumns();
             dataRange.getRow(0).format.font.bold = true;
@@ -715,7 +911,7 @@ async function loadDataIntoNewSheet() {
             table.style = "TableStyleMedium2";
 
             // Define the target cell for the pivot table
-            const pivotTargetCell = newSheet.getCell(0, 9); // Col J (3 for metadata/pad + 2 for data + 3 for hidden columns + 1 for padding)
+            const pivotTargetCell = newSheet.getCell(0, 10); // Col K (4 for metadata/pad + 2 for data + 3 for hidden columns + 1 for padding)
 
             // Load the address properties before accessing them
             dataRange.load("address");
@@ -725,14 +921,21 @@ async function loadDataIntoNewSheet() {
             lastLoadedDataRange = {
                 sheetName: newSheet.name,
                 tableName: safeTableName,
-                dataRangeAddress: dataRange.address,
-                dataStartColZeroBased: 3,
+                dataRangeAddress: dataRange.address, // This will now reflect the new starting column
+                dataStartColZeroBased: 4,
                 rowCount: dataValues.length,
                 pivotTargetAddress: pivotTargetCell.address,
-                seriesId: currentSeriesId
+                seriesId: currentSeriesId,
+                metadataStartColZeroBased: 0, // Metadata starts at column A (0-indexed) in a new sheet for new sheets
+                metadataRowCount: metadataArray.length, // Number of rows in the metadata table
+                notesContent: notesContent // Store notes content for later use
             };
         });
 
+        await createHistogram(currentSeriesName);
+        await createLineChart(currentSeriesName);
+        await createBoxPlot(currentSeriesName);
+        await createNotesTextBox(notesContent); // Create the text box after all charts
         promptForPivotTable();
     } catch (error) {
         console.error("Error loading data into new sheet:", error);
@@ -741,7 +944,6 @@ async function loadDataIntoNewSheet() {
         btnLoadDataCurrentSheet.disabled = false;
         btnLoadDataNewSheet.disabled = false;
     }
-    await createHistogram(currentSeriesName);
 }
 
 /* --------------------------------------------------------------------------
@@ -790,9 +992,9 @@ function promptForPivotTable() {
         `;
     }
 
-    const yearHtml = createCheckboxHtml("ptYear", "Years", canUseYear, checkYear);
-    const quarterHtml = createCheckboxHtml("ptQuarter", "Quarters", canUseQuarter, checkQuarter);
-    const monthHtml = createCheckboxHtml("ptMonth", "Months", canUseMonth, checkMonth);
+    const yearHtml = createCheckboxHtml("ptYear", "Year", canUseYear, checkYear);
+    const quarterHtml = createCheckboxHtml("ptQuarter", "Quarter", canUseQuarter, checkQuarter);
+    const monthHtml = createCheckboxHtml("ptMonth", "Month", canUseMonth, checkMonth);
 
     // 5. Construct the final output HTML
     outputEl.innerHTML = `
@@ -833,9 +1035,9 @@ function promptForPivotTable() {
 async function generatePivotTable() {
     const aggFn = document.getElementById("ptAggregation").value;
     const groupFields = [];
-    if (document.getElementById("ptYear") && document.getElementById("ptYear").checked) groupFields.push("Years");
-    if (document.getElementById("ptQuarter") && document.getElementById("ptQuarter").checked) groupFields.push("Quarters");
-    if (document.getElementById("ptMonth") && document.getElementById("ptMonth").checked) groupFields.push("Months");
+    if (document.getElementById("ptYear") && document.getElementById("ptYear").checked) groupFields.push("Year");
+    if (document.getElementById("ptQuarter") && document.getElementById("ptQuarter").checked) groupFields.push("Quarter");
+    if (document.getElementById("ptMonth") && document.getElementById("ptMonth").checked) groupFields.push("Month");
 
     if (groupFields.length === 0) {
         alert("Please select at least one date grouping.");
@@ -849,45 +1051,49 @@ async function generatePivotTable() {
     try {
         await Excel.run(async (context) => {
             const sheet = context.workbook.worksheets.getItem(lastLoadedDataRange.sheetName);
-            const table = sheet.tables.getItem(lastLoadedDataRange.tableName);
             
-            const colData = {};
-            groupFields.forEach(field => {
-                colData[field] = [];
-            });
+            let extendedCols = groupFields.length;
+            let dataStartCol = lastLoadedDataRange.dataStartColZeroBased;
+            let rowCount = lastLoadedDataRange.rowCount;
 
-            // Use native month abbreviations so Excel natively sorts them chronologically
-            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const extraDataValues = [];
+            extraDataValues.push(groupFields); // Write header
+
+            // Pre-format month names to make PivotTable sorting alphabetical
+            const monthNames = ["01 - Jan", "02 - Feb", "03 - Mar", "04 - Apr", "05 - May", "06 - Jun", "07 - Jul", "08 - Aug", "09 - Sep", "10 - Oct", "11 - Nov", "12 - Dec"];
 
             currentData.forEach(r => {
                 const parts = r.date.split("-");
+                const rowVals = [];
                 if(parts.length === 3) {
                     const year = parseInt(parts[0], 10);
                     const month = parseInt(parts[1], 10);
-                    const quarter = "Qtr" + Math.ceil(month / 3);
+                    const quarter = "Q" + Math.ceil(month / 3);
                     const monthName = monthNames[month - 1]; 
 
                     groupFields.forEach(field => {
-                        if (field === "Years") colData[field].push([year]);
-                        else if (field === "Quarters") colData[field].push([quarter]);
-                        else if (field === "Months") colData[field].push([monthName]);
+                        if (field === "Year") rowVals.push(year);
+                        else if (field === "Quarter") rowVals.push(quarter);
+                        else if (field === "Month") rowVals.push(monthName);
                     });
                 } else {
-                    groupFields.forEach(field => colData[field].push([""]));
+                    groupFields.forEach(() => rowVals.push(""));
                 }
+                extraDataValues.push(rowVals);
             });
 
-            groupFields.forEach(field => {
-                let newCol = table.columns.add(null, null, field);
-                newCol.getDataBodyRange().values = colData[field];
-                newCol.getRange().columnHidden = true;
-            });
+            const extraRange = sheet.getRangeByIndexes(0, dataStartCol + 2, rowCount, extendedCols);
+            extraRange.values = extraDataValues;
+            extraRange.columnHidden = true; // Hides the generated columns so you don't have to see them
             
+            const fullDataRange = sheet.getRangeByIndexes(0, dataStartCol, rowCount, 2 + extendedCols);
+            fullDataRange.load("address");
+
             const targetCell = sheet.getRange(lastLoadedDataRange.pivotTargetAddress);
             await context.sync();
 
             const safeName = "Pivot_" + lastLoadedDataRange.seriesId.replace(/[^a-zA-Z0-9]/g, "") + "_" + Math.floor(Math.random() * 1000);
-            const pivotTable = sheet.pivotTables.add(safeName, lastLoadedDataRange.tableName, targetCell);
+            const pivotTable = sheet.pivotTables.add(safeName, fullDataRange, targetCell);
 
             groupFields.forEach(field => {
                 pivotTable.rowHierarchies.add(pivotTable.hierarchies.getItem(field));
@@ -895,7 +1101,7 @@ async function generatePivotTable() {
 
             const dataHierarchy = pivotTable.dataHierarchies.add(pivotTable.hierarchies.getItem(lastLoadedDataRange.seriesId));
             dataHierarchy.summarizeBy = aggFn;
-            pivotTable.layout.layoutType = "Compact";
+            pivotTable.layout.layoutType = Excel.PivotLayoutType.compact;
 
             await context.sync();
         });
@@ -931,7 +1137,7 @@ function quickRecallLastSeries() {
         infoEl.innerHTML = "<p>No series to recall.</p>";
         return;
     }
-    currentSeriesId = lastLoadedSeries.seriesId ?? lastLoadedSeries.seriesId;
+    currentSeriesId = lastLoadedSeries.seriesId;
     currentData = lastLoadedSeries.data;
     infoEl.innerHTML = `<p>Recalled series <strong>${currentSeriesId}</strong>.</p>`;
     btnLoadDataCurrentSheet.disabled = false;
@@ -995,32 +1201,140 @@ function viewSessionBookmarks() {
 
 async function createHistogram(currentSeriesName) {
     await Excel.run(async (context) => {
-        let sheet = context.workbook.worksheets.getActiveWorksheet();
-        // Deletes any existing charts to avoid clutter if user loads multiple series
-        sheet.charts.load("items");
-        await context.sync();
-        sheet.charts.items.forEach(chart => {
-            chart.delete();
-        }); 
-        
-        if (!lastLoadedDataRange || !lastLoadedDataRange.tableName) return;
-        
-        let table = sheet.tables.getItem(lastLoadedDataRange.tableName);
-        let valueColumn = table.columns.getItemAt(1).getDataBodyRange();
-        
-        // Create histogram
-        let chart = sheet.charts.add(Excel.ChartType.histogram, valueColumn, Excel.ChartSeriesBy.columns);
-        // Chart title using series name
-        chart.title.text = `${currentSeriesName} Histogram`;
-        // Cell position
-        chart.setPosition("A15", "D30");
-        // Y-axis title
+        if (!lastLoadedDataRange) return; // Safety check
+        const sheet = context.workbook.worksheets.getActiveWorksheet();
+
+        const valueColumnIndex = lastLoadedDataRange.dataStartColZeroBased + 1; // Value column is 1 index after Date column
+        const rowCount = lastLoadedDataRange.rowCount;
+        const dataRange = sheet.getRangeByIndexes(1, valueColumnIndex, rowCount - 1, 1);
+
+        const chart = sheet.charts.add(Excel.ChartType.histogram, dataRange, Excel.ChartSeriesBy.columns);
+        chart.title.text = `${currentSeriesName || currentSeriesId} Histogram`;
+
+        // Position the chart under its corresponding metadata.
+        const chartStartCol = lastLoadedDataRange.metadataStartColZeroBased;
+        const chartStartRow = lastLoadedDataRange.metadataRowCount + 2; // 2 rows below metadata
+        const chartEndRow = chartStartRow + 15 - 1;   // 15 rows tall
+
+        chart.setPosition(
+            sheet.getCell(chartStartRow, chartStartCol),
+            sheet.getCell(chartEndRow, chartStartCol + 3) // 4 columns wide (to match metadata width)
+        );
+
         chart.axes.valueAxis.title.text = "Frequency";
         chart.axes.valueAxis.title.visible = true;
         chart.axes.categoryAxis.title.text = "Value Range";
         chart.axes.categoryAxis.title.visible = true;
-        // Improve X-axis readability
         chart.axes.categoryAxis.format.font.size = 9;
+
+        await context.sync();
+    });
+}
+
+async function createNotesTextBox(notesContent) {
+    if (!notesContent || !lastLoadedDataRange) return;
+
+    await Excel.run(async (context) => {
+        const sheet = context.workbook.worksheets.getActiveWorksheet();
+
+        const chartStartCol = lastLoadedDataRange.metadataStartColZeroBased;
+        const metadataRowCount = lastLoadedDataRange.metadataRowCount;
+
+        // Calculate end row of the last chart (Box Plot)
+        const histogramEndRow = metadataRowCount + 2 + 15 - 1;
+        const lineChartEndRow = histogramEndRow + 2 + 15 - 1;
+        const boxPlotEndRow = lineChartEndRow + 2 + 15 - 1;
+
+        const textBoxStartRow = boxPlotEndRow + 2; // 2 rows below the box plot
+
+        const widthRange = sheet.getRangeByIndexes(0, chartStartCol, 1, 3);
+        const startCell = sheet.getCell(textBoxStartRow, chartStartCol);
+
+        widthRange.load("width");
+        startCell.load("left, top");
+
+        await context.sync();
+
+        const shape = sheet.shapes.addTextBox(notesContent);
+        shape.left = startCell.left;
+        shape.top = startCell.top;
+        shape.width = widthRange.width;
+        shape.height = 150; // A reasonable default height, can be adjusted or made dynamic
+
+        shape.textFrame.textRange.font.size = 9;
+        shape.textFrame.textRange.font.name = "Calibri";
+        shape.textFrame.wordWrap = true;
+        shape.textFrame.verticalAlignment = Excel.VerticalAlignment.top;
+        shape.textFrame.horizontalAlignment = Excel.HorizontalAlignment.left;
+
+        await context.sync();
+    });
+}
+async function createBoxPlot(currentSeriesName) {
+    await Excel.run(async (context) => {
+        if (!lastLoadedDataRange) return; // Safety check
+        const sheet = context.workbook.worksheets.getActiveWorksheet();
+
+        // Box plots typically use the value column to show statistical distribution
+        const valueColumnIndex = lastLoadedDataRange.dataStartColZeroBased + 1;
+        const rowCount = lastLoadedDataRange.rowCount;
+        const dataRange = sheet.getRangeByIndexes(1, valueColumnIndex, rowCount - 1, 1);
+
+        const chart = sheet.charts.add(Excel.ChartType.boxwhisker, dataRange, Excel.ChartSeriesBy.columns);
+
+        chart.title.text = `${currentSeriesName || "Series"} Distribution (Box Plot)`;
+
+        // Position the chart under the line chart
+        const chartStartCol = lastLoadedDataRange.metadataStartColZeroBased;
+        const histogramEndRow = lastLoadedDataRange.metadataRowCount + 2 + 15 - 1;
+        const lineChartEndRow = histogramEndRow + 2 + 15 - 1;
+        const boxPlotStartRow = lineChartEndRow + 2; 
+        const boxPlotEndRow = boxPlotStartRow + 15 - 1;
+
+        chart.setPosition(
+            sheet.getCell(boxPlotStartRow, chartStartCol),
+            sheet.getCell(boxPlotEndRow, chartStartCol + 3) // 4 columns wide
+        );
+
+        await context.sync();
+    });
+}
+
+async function createLineChart(currentSeriesName) {
+    await Excel.run(async (context) => {
+        if (!lastLoadedDataRange) return; // Safety check
+        const sheet = context.workbook.worksheets.getActiveWorksheet();
+
+        // 1. Identify the data (X = Dates, Y = Values)
+        const startCol = lastLoadedDataRange.dataStartColZeroBased;
+        const rowCount = lastLoadedDataRange.rowCount;
+        
+        // Line charts need two columns for time series: Date and Value.
+        const dataRange = sheet.getRangeByIndexes(1, startCol, rowCount - 1, 2);
+
+        // 2. Add the Chart (Line)
+        const chart = sheet.charts.add(Excel.ChartType.line, dataRange, Excel.ChartSeriesBy.columns);
+
+        chart.title.text = `${currentSeriesName || "Series"} Trend (Line Chart)`;
+
+        // 3. Position the chart under the histogram for the same dataset.
+        const chartStartCol = lastLoadedDataRange.metadataStartColZeroBased;
+        const histogramEndRow = lastLoadedDataRange.metadataRowCount + 2 + 15 - 1; // End row of the histogram
+        const lineChartStartRow = histogramEndRow + 2; // 2 rows below the histogram
+        const lineChartEndRow = lineChartStartRow + 15 - 1;   // 15 rows tall
+
+        chart.setPosition(
+            sheet.getCell(lineChartStartRow, chartStartCol),
+            sheet.getCell(lineChartEndRow, chartStartCol + 3) // 4 columns wide, same as histogram
+        );
+
+        // 4. Formatting
+        chart.axes.valueAxis.title.text = "Value";
+        chart.axes.valueAxis.title.visible = true;
+        chart.axes.categoryAxis.title.text = "Date";
+        chart.axes.categoryAxis.title.visible = true;
+        chart.legend.visible = false; // Only one series, so legend is not needed.
+
         await context.sync();
     });
 }
