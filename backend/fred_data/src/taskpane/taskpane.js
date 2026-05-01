@@ -1,8 +1,7 @@
 /* --------------------------------------------------------------------------
    taskpane.js - Fixed version for category navigation freezing
 -------------------------------------------------------------------------- */
-
-const BACKEND_BASE_URL = "http://127.0.0.1:8080";
+const BACKEND_BASE_URL = "http://localhost:8080"; // Use localhost as the backend is mapped to host's 8080
 
 /* --------------------------------------------------------------------------
    GLOBAL STATE & CACHES
@@ -63,11 +62,6 @@ Office.onReady(() => {
     btnViewBookmarks = document.getElementById("btnViewBookmarks");
 
     document.getElementById("btnGetCategories").onclick = loadRootCategories;
-    const btnStats = document.getElementById("btnStatisticalAnalysis");
-    if (btnStats) {
-        btnStats.textContent = "Time Series Decomposition";
-        btnStats.onclick = performTimeSeriesDecomposition;
-    }
     document.getElementById("btnSearch").onclick = textSearch;
     document.getElementById("btnBack").onclick = goBack;
     btnLoadDataCurrentSheet.onclick = loadDataIntoCurrentSheet;
@@ -168,10 +162,6 @@ function updateBackButton() {
 }
 
 function updateStatisticalAnalysisButton() {
-    // The decomposition button is now independent of loaded data and works on selection.
-    // It is enabled by default and only disabled during the operation itself.
-    document.getElementById("btnStatisticalAnalysis").disabled = false;
-
     const isDataReadyForLoad = currentData && currentData.length > 0;
     btnLoadDataCurrentSheet.disabled = !isDataReadyForLoad;
     btnLoadDataNewSheet.disabled = !isDataReadyForLoad;
@@ -534,35 +524,89 @@ function renderSeriesInfo(infoList) {
    STATISTICAL ANALYSIS
 -------------------------------------------------------------------------- */
 
-async function performTimeSeriesDecomposition() {
-    infoEl.innerHTML = `<p>Performing Time Series Decomposition on selected data...</p>`;
-    document.getElementById("btnStatisticalAnalysis").disabled = true;
+function promptForDecomposition() {
+    navStack.push({ type: 'decompPrompt' });
+    infoEl.innerHTML = `<p>Data successfully loaded into Excel! Would you like to perform a Time Series Decomposition?</p>`;
+    
+    const freq = (lastLoadedSeries && lastLoadedSeries.info && lastLoadedSeries.info.frequency) 
+        ? lastLoadedSeries.info.frequency.toLowerCase() 
+        : "";
+    const isSA = (lastLoadedSeries && lastLoadedSeries.info && lastLoadedSeries.info.seasonal_adjustment)
+        ? lastLoadedSeries.info.seasonal_adjustment.toLowerCase().includes("seasonally adjusted") &&
+          !lastLoadedSeries.info.seasonal_adjustment.toLowerCase().includes("not seasonally adjusted")
+        : false;
+
+    let L = 1;
+    if (freq.includes("month")) L = 12;
+    else if (freq.includes("quarter")) L = 4;
+    else if (freq.includes("week")) L = 52;
+    else if (freq.includes("day") || freq.includes("daily")) L = 365;
+
+    const canUseSeasonal = !isSA && L > 1;
+    const seasonalExtraHtml = canUseSeasonal ? "" : `<span style="color: #d83b01; font-style: italic; font-size: 12px; margin-left: 5px;">(Not Applicable to Data Set)</span>`;
+
+    outputEl.innerHTML = `
+        <div style="text-align: left; margin-top: 15px; padding: 15px; border: 1px solid #ccc; background-color: #f9f9f9; border-radius: 6px;">
+            <p style="margin-top: 0; margin-bottom: 10px;"><strong>Select Decomposition Components:</strong></p>
+            <div style="margin-bottom: 8px;">
+                <label style="cursor: pointer; display: inline-flex; align-items: center;">
+                    <input type="checkbox" id="dcTrend" value="Trend" checked style="margin-right: 5px;">
+                    <span style="font-weight: bold;">Trend</span>
+                </label>
+            </div>
+            <div style="margin-bottom: 8px;">
+                <label style="cursor: pointer; display: inline-flex; align-items: center;">
+                    <input type="checkbox" id="dcCyclical" value="Cyclical" checked style="margin-right: 5px;">
+                    <span style="font-weight: bold;">Cyclical</span>
+                </label>
+            </div>
+            <div style="margin-bottom: 8px;">
+                <label style="cursor: ${canUseSeasonal ? 'pointer' : 'not-allowed'}; display: inline-flex; align-items: center;">
+                    <input type="checkbox" id="dcSeasonal" value="Seasonal" ${canUseSeasonal ? 'checked' : 'disabled'} style="margin-right: 5px;">
+                    <span style="font-weight: bold;">Seasonal</span>
+                </label>
+                ${seasonalExtraHtml}
+            </div>
+            <div style="margin-bottom: 8px;">
+                <label style="cursor: pointer; display: inline-flex; align-items: center;">
+                    <input type="checkbox" id="dcResidual" value="Residual" checked style="margin-right: 5px;">
+                    <span style="font-weight: bold;">Residual</span>
+                </label>
+            </div>
+            
+            <button id="btnGenerateDecomp" class="buttonStyle" style="width: 100%; margin-top: 10px; margin-bottom: 10px;">Generate Decomposition</button>
+            <button id="btnSkipDecomp" class="buttonStyle" style="width: 100%; background-color: #666;">Skip</button>
+        </div>
+    `;
+
+    document.getElementById("btnGenerateDecomp").onclick = generateDecompositionFromPrompt;
+    document.getElementById("btnSkipDecomp").onclick = () => {
+        if (navStack[navStack.length - 1].type === 'decompPrompt') navStack.pop();
+        promptForPivotTable();
+    };
+    updateBackButton();
+}
+
+async function generateDecompositionFromPrompt() {
+    const useTrend = document.getElementById("dcTrend").checked;
+    const useCyclical = document.getElementById("dcCyclical").checked;
+    const useSeasonal = document.getElementById("dcSeasonal") && !document.getElementById("dcSeasonal").disabled && document.getElementById("dcSeasonal").checked;
+    const useResidual = document.getElementById("dcResidual").checked;
+
+    if (!useTrend && !useCyclical && !useSeasonal && !useResidual) {
+        alert("Please select at least one decomposition component.");
+        return;
+    }
+
+    infoEl.innerHTML = `<p>Performing Time Series Decomposition...</p>`;
+    document.getElementById("btnGenerateDecomp").disabled = true;
+    document.getElementById("btnSkipDecomp").disabled = true;
 
     try {
         await Excel.run(async (context) => {
-            const sheet = context.workbook.worksheets.getActiveWorksheet();
-            const range = context.workbook.getSelectedRange();
-            
-            const tables = sheet.tables.load("items/name");
-            await context.sync();
+            const sheet = context.workbook.worksheets.getItem(lastLoadedDataRange.sheetName);
+            let targetTable = sheet.tables.getItem(lastLoadedDataRange.tableName);
 
-            let targetTable = null;
-            for (const table of tables.items) {
-                const tableRange = table.getRange();
-                const intersection = tableRange.getIntersectionOrNullObject(range);
-                intersection.load("isNullObject");
-                await context.sync();
-                if (!intersection.isNullObject) {
-                    targetTable = table;
-                    break;
-                }
-            }
-
-            if (!targetTable) {
-                throw new Error("Could not find an Excel Table in your selection. Please select any cell inside the loaded data table.");
-            }
-
-            // Load the table's full range and values to ensure we get everything perfectly
             const fullTableRange = targetTable.getRange().load("values, rowCount, columnCount");
             targetTable.load("name, columns/items/name");
             await context.sync();
@@ -571,34 +615,20 @@ async function performTimeSeriesDecomposition() {
             const tableValues = fullTableRange.values;
             
             if (fullTableRange.columnCount < 2) {
-                throw new Error("The selected table does not have enough columns to perform decomposition.");
+                throw new Error("The loaded table does not have enough columns to perform decomposition.");
             }
 
-            const headers = tableValues[0];
-            const seriesIdFromHeader = headers[1]; // Value column is 2nd column
             const dataRows = tableValues.slice(1);
-
-            if (!seriesIdFromHeader || typeof seriesIdFromHeader !== 'string') {
-                throw new Error("Could not identify the Series ID from the header of the second column in the table.");
-            }
-
-            // Fetch series info to get frequency and seasonal adjustment
-            const seriesInfoList = await fetchJSON(`${BACKEND_BASE_URL}/info/${seriesIdFromHeader}`);
-            const info = Array.isArray(seriesInfoList) && seriesInfoList.length > 0 ? seriesInfoList[0] : {};
+            const info = lastLoadedSeries.info || {};
+            const seriesIdFromHeader = lastLoadedSeries.seriesId;
             
             const freq = (info && info.frequency) ? info.frequency.toLowerCase() : "";
-            const isSA = (info && info.seasonal_adjustment)
-                ? info.seasonal_adjustment.toLowerCase().includes("seasonally adjusted") &&
-                  !info.seasonal_adjustment.toLowerCase().includes("not seasonally adjusted")
-                : false;
 
             let L = 1;
             if (freq.includes("month")) L = 12;
             else if (freq.includes("quarter")) L = 4;
             else if (freq.includes("week")) L = 52;
             else if (freq.includes("day") || freq.includes("daily")) L = 365;
-
-            const useSeasonal = !isSA && L > 1;
 
             const values = dataRows.map(row => {
                 const parsed = parseFloat(row[1]);
@@ -648,35 +678,50 @@ async function performTimeSeriesDecomposition() {
 
             const existingCols = new Set(targetTable.columns.items.map(c => c.name));
                 
-            const trendVals = [["Trend"], ...trend.map(v => [v === null ? "" : v])];
-            const cyclicalVals = [["Cyclical"], ...cyclical.map(v => [v === null ? "" : v])];
-            const seasonalVals = [["Seasonal"], ...seasonal.map(v => [v === null ? "" : v])];
-            const residualVals = [["Residual"], ...residual.map(v => [v === null ? "" : v])];
+            const trendVals = [["Trend"], ...trend.map(v => [v === null ? null : v])];
+            const cyclicalVals = [["Cyclical"], ...cyclical.map(v => [v === null ? null : v])];
+            const seasonalVals = [["Seasonal"], ...seasonal.map(v => [v === null ? null : v])];
+            const residualVals = [["Residual"], ...residual.map(v => [v === null ? null : v])];
+            
+            let colsToAdd = [];
+            if (useTrend && !existingCols.has("Trend")) colsToAdd.push({ name: "Trend", values: trendVals });
+            if (useCyclical && !existingCols.has("Cyclical")) colsToAdd.push({ name: "Cyclical", values: cyclicalVals });
+            if (useSeasonal && !existingCols.has("Seasonal")) colsToAdd.push({ name: "Seasonal", values: seasonalVals });
+            if (useResidual && !existingCols.has("Residual")) colsToAdd.push({ name: "Residual", values: residualVals });
 
-            let colsToAddCount = 0;
-            if (!existingCols.has("Trend")) colsToAddCount++;
-            if (!existingCols.has("Cyclical")) colsToAddCount++;
-            if (useSeasonal && !existingCols.has("Seasonal")) colsToAddCount++;
-            if (!existingCols.has("Residual")) colsToAddCount++;
+            const colsToAddCount = colsToAdd.length;
 
             if (colsToAddCount > 0) {
-                // Shift cells right by inserting whole columns to prevent "move cells in a table" errors 
-                const lastTableCol = targetTable.getRange().getLastColumn();
-                const insertRange = lastTableCol.getOffsetRange(0, 1).getEntireColumn().getResizedRange(0, colsToAddCount - 1);
-                insertRange.insert(Excel.InsertShiftDirection.right);
+                // --- 1. Make Space by inserting entire columns ---
+                // This is the most robust way to shift all content on the sheet and avoid breaking other tables.
+                const tableRange = targetTable.getRange().load("columnIndex, columnCount, rowCount");
+                await context.sync();
+                const insertColIndex = tableRange.columnIndex + tableRange.columnCount;
+                
+                const columnsToInsert = sheet.getRangeByIndexes(0, insertColIndex, 1, colsToAddCount).getEntireColumn();
+                columnsToInsert.insert(Excel.InsertShiftDirection.right);
                 await context.sync();
                 
-                // RE-FETCH TABLE: Inserting entire columns invalidates the previous targetTable reference.
+                // --- 2. Re-fetch table reference as the insertion invalidates old ones ---
                 targetTable = sheet.tables.getItem(tableName);
+
+                // --- 3. Add empty columns first (structural change) ---
+                for (const col of colsToAdd) {
+                    targetTable.columns.add(null, null, col.name);
+                }
+                await context.sync();
+
+                // --- 4. Populate the new columns with data ---
+                for (const col of colsToAdd) {
+                    const columnReference = targetTable.columns.getItem(col.name);
+                    const bodyRange = columnReference.getDataBodyRange();
+                    bodyRange.values = col.values.slice(1); // Data only, no header
+                }
                 await context.sync();
             }
 
-            if (!existingCols.has("Trend")) targetTable.columns.add(null, trendVals, "Trend");
-            if (!existingCols.has("Cyclical")) targetTable.columns.add(null, cyclicalVals, "Cyclical");
-            if (useSeasonal && !existingCols.has("Seasonal")) targetTable.columns.add(null, seasonalVals, "Seasonal");
-            if (!existingCols.has("Residual")) targetTable.columns.add(null, residualVals, "Residual");
-
             const newTableRange = targetTable.getRange();
+            newTableRange.columnHidden = false; // Unhide columns 
             newTableRange.load("columnIndex, rowIndex, rowCount");
             await context.sync();
 
@@ -685,23 +730,28 @@ async function performTimeSeriesDecomposition() {
             chart.title.text = `${info.title || seriesIdFromHeader} - Decomposition`;
 
             // Position chart under the datasets' notes and aligned with the metadata
-            const chartStartCol = newTableRange.columnIndex >= 4 ? newTableRange.columnIndex - 4 : 0;
-            const chartStartRow = newTableRange.rowIndex + 85; 
+            const chartStartCol = lastLoadedDataRange.metadataStartColZeroBased;
             
-            chart.setPosition(sheet.getCell(chartStartRow, chartStartCol), sheet.getCell(chartStartRow + 15, chartStartCol + 3));
+            // Dynamically calculate position relative to previously created charts
+            const metadataRowCount = lastLoadedDataRange.metadataRowCount;
+            const histogramEndRow = metadataRowCount + 2 + 15 - 1;
+            const lineChartEndRow = histogramEndRow + 2 + 15 - 1;
+            const boxPlotEndRow = lineChartEndRow + 2 + 15 - 1;
+            const textBoxEndRow = boxPlotEndRow + 2 + 10 - 1;
+            const decompChartStartRow = textBoxEndRow + 4;
+            
+            chart.setPosition(sheet.getCell(decompChartStartRow, chartStartCol), sheet.getCell(decompChartStartRow + 15, chartStartCol + 3));
 
             await context.sync();
         });
 
-        infoEl.innerHTML = `<p style="color: green;">Time Series Decomposition completed! Columns added to your data table and chart generated.</p>`;
+        infoEl.innerHTML = `<p style="color: green;">Time Series Decomposition completed!</p>`;
     } catch (error) {
         console.error("Decomposition error:", error);
-        if (error.debugInfo) {
-            console.error("Excel API Error:", error.debugInfo);
-        }
         infoEl.innerHTML = `<p>Error performing decomposition: ${error.message || error}</p>`;
     } finally {
-        document.getElementById("btnStatisticalAnalysis").disabled = false;
+        if (navStack[navStack.length - 1].type === 'decompPrompt') navStack.pop();
+        promptForPivotTable(); // Proceed to the Pivot Table prompt unconditionally
     }
 }
 
@@ -816,7 +866,7 @@ async function loadDataIntoCurrentSheet() {
         await createLineChart(currentSeriesName);
         await createBoxPlot(currentSeriesName);
         await createNotesTextBox(notesContent); // Create the text box after all charts
-        promptForPivotTable();
+        promptForDecomposition();
     } catch (error) {
         console.error("Error loading data into current sheet:", error);
         infoEl.innerHTML = `<p>Error loading data into current sheet: ${error.message || error}</p>`;
@@ -936,7 +986,7 @@ async function loadDataIntoNewSheet() {
         await createLineChart(currentSeriesName);
         await createBoxPlot(currentSeriesName);
         await createNotesTextBox(notesContent); // Create the text box after all charts
-        promptForPivotTable();
+        promptForDecomposition();
     } catch (error) {
         console.error("Error loading data into new sheet:", error);
         infoEl.innerHTML = `<p>Error loading data into new sheet: ${error.message || error}</p>`;
@@ -1051,11 +1101,20 @@ async function generatePivotTable() {
     try {
         await Excel.run(async (context) => {
             const sheet = context.workbook.worksheets.getItem(lastLoadedDataRange.sheetName);
-            
-            let extendedCols = groupFields.length;
-            let dataStartCol = lastLoadedDataRange.dataStartColZeroBased;
-            let rowCount = lastLoadedDataRange.rowCount;
+            const table = sheet.tables.getItem(lastLoadedDataRange.tableName);
 
+            // Get the current range of the table, which might include decomposition columns
+            const tableRange = table.getRange();
+            tableRange.load("columnIndex, columnCount, rowCount");
+            await context.sync();
+
+            const dataStartCol = tableRange.columnIndex;
+            const tableTotalCols = tableRange.columnCount;
+            const rowCount = tableRange.rowCount; // This includes the header row
+
+            const extendedCols = groupFields.length;
+
+            // --- Create helper columns for pivot table ---
             const extraDataValues = [];
             extraDataValues.push(groupFields); // Write header
 
@@ -1065,11 +1124,11 @@ async function generatePivotTable() {
             currentData.forEach(r => {
                 const parts = r.date.split("-");
                 const rowVals = [];
-                if(parts.length === 3) {
+                if (parts.length === 3) {
                     const year = parseInt(parts[0], 10);
                     const month = parseInt(parts[1], 10);
                     const quarter = "Q" + Math.ceil(month / 3);
-                    const monthName = monthNames[month - 1]; 
+                    const monthName = monthNames[month - 1];
 
                     groupFields.forEach(field => {
                         if (field === "Year") rowVals.push(year);
@@ -1082,14 +1141,18 @@ async function generatePivotTable() {
                 extraDataValues.push(rowVals);
             });
 
-            const extraRange = sheet.getRangeByIndexes(0, dataStartCol + 2, rowCount, extendedCols);
+            // Place helper columns immediately to the right of the existing table
+            const helperColStart = dataStartCol + tableTotalCols;
+            const extraRange = sheet.getRangeByIndexes(0, helperColStart, rowCount, extendedCols);
             extraRange.values = extraDataValues;
-            extraRange.columnHidden = true; // Hides the generated columns so you don't have to see them
-            
-            const fullDataRange = sheet.getRangeByIndexes(0, dataStartCol, rowCount, 2 + extendedCols);
-            fullDataRange.load("address");
+            extraRange.columnHidden = true;
 
-            const targetCell = sheet.getRange(lastLoadedDataRange.pivotTargetAddress);
+            // The full range for the pivot table source now includes the original table AND the new helper columns
+            const fullDataRange = sheet.getRangeByIndexes(0, dataStartCol, rowCount, tableTotalCols + extendedCols);
+
+            // Place the pivot table to the right of the helper columns, with a gap
+            const targetCell = sheet.getCell(0, helperColStart + extendedCols + 1);
+
             await context.sync();
 
             const safeName = "Pivot_" + lastLoadedDataRange.seriesId.replace(/[^a-zA-Z0-9]/g, "") + "_" + Math.floor(Math.random() * 1000);

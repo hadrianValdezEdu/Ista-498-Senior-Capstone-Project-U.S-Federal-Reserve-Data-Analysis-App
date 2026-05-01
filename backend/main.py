@@ -20,7 +20,7 @@ search = Search(api_key=FRED_API_KEY)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://localhost:3000", "https://127.0.0.1:3000"],
+    allow_origins=["https://localhost:3000", "https://127.0.0.1:3000", "http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

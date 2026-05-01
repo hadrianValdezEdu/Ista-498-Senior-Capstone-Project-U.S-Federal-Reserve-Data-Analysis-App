@@ -29,7 +29,7 @@
                 placeholder="Enter Series ID or FRED URL"
             />
             <button id="btnSearch"><strong>Search</strong></button>
-            <button id="connorsbtn" onclick="window.open('https://www.youtube.com/watch?v=oHg5SJYRHA0', '_blank');">ML Button</button>
+            <button id="connorsbtn" onclick="window.open('https://four98-mldashboard.onrender.com/', 'MLDashboardWindow');">ML Button</button>
         </div>
 
         <div id="sort-container" style="margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 10px;">
@@ -44,7 +44,7 @@
                 <option value="units">Units</option>
                 <option value="seasonal_adjustment">Seasonal Adjustment</option>
             </select>
-            <div style="margin-left: 15px;">
+            <div style="margin-left: 15px; display: none;">
                 <input type="checkbox" id="toggleDiscontinued" style="margin-right: 5px;">
                 <label for="toggleDiscontinued">Show Discontinued</label>
             </div>
@@ -59,10 +59,10 @@
     </div>
     <!-- Secondary Action Buttons -->
     <div style="display: flex; justify-content: center; align-items: center;" class="button-container">
-        <button id="btnStatisticalAnalysis" disabled>Statistical Analysis</button>
+        <button id="btnStatisticalAnalysis" style="display: none;" disabled>Statistical Analysis</button>
         <button id="btnQuickRecall" disabled>Quick Recall Last Series</button>
         <button id="btnViewBookmarks" disabled>View Bookmarks</button>
-        <button id="btnResetCache">Reset Cache</button>
+        <button id="btnResetCache" style="display: none;">Reset Cache</button>
     </div>
 
         <!-- Dynamic content -->
