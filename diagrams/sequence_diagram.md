@@ -2,46 +2,60 @@
 sequenceDiagram
     autonumber
     actor User
-    participant UI as Taskpane (taskpane.js)
-    participant Excel as Excel Worksheet
-    participant API as FastAPI (main.py)
-    participant Search as Search Class (search.py)
+    participant UI as Taskpane (taskpane.html)
+    participant JS as Taskpane Logic (taskpane.js)
+    participant Excel as Excel Host
+    participant API as FastAPI Backend
     participant FRED as FRED API
 
-    %% Scenario 1: Category/Series Browsing
-    User->>UI: Clicks "Get Categories" or a Category button
-    UI->>API: GET /categories/{category_id}
-    API->>Search: get_subcategories(category_id)
-    Search->>FRED: GET /fred/category/children (HTTPS)
-    FRED-->>Search: JSON response
-    Search-->>API: Parsed categories list
-    API-->>UI: JSON array of categories/series
-    UI-->>User: Renders category/series buttons
-
-    %% Scenario 2: Search (Handles IDs & URLs for Categories and Series)
-    User->>UI: Pastes URL or enters ID and clicks "Search"
-    UI->>API: GET /logic/search/{input}
-    API->>API: Parse input (Extract ID & determine Category vs Series)
-    
-    alt input is Category
-        API->>Search: get_subcategories(id) / get_series(id)
-        Search-->>API: Parsed categories/series list
-        API-->>UI: JSON array of categories/series
-    else input is Series
-        API->>Search: get_series_info(id) & get_data(id)
-        Search->>FRED: GET /fred/series & /fred/series/observations
-        FRED-->>Search: JSON metadata & observations
-        Search-->>API: Cleaned DataFrame / Dictionary
-        API-->>UI: JSON data {info: [...], data: [...]}
+    %% Scenario 1: Category Browsing (Alternative to Search)
+    User->>UI: Clicks "Get Categories" or a Category
+    UI->>JS: loadRootCategories() / handleCategoryClick()
+    JS->>JS: Check Category/Series Cache
+    alt Data not in Cache
+        JS->>API: GET /categories/{id} & /series/{id}
+        API->>FRED: GET /fred/category/children & /fred/category/series
+        FRED-->>API: JSON category & series data
+        API-->>JS: Processed arrays
+        JS->>JS: Save to Cache
     end
-    
-    UI-->>User: Displays Results (Category List OR Series Info)
+    JS-->>UI: Render Category & Series Buttons
 
-    %% Scenario 3: Insert into Excel
-    User->>UI: Clicks "Load Data into Excel"
-    UI->>Excel: Excel.run() -> Select active worksheet
-    UI->>Excel: Define target range & inject currentData
-    UI->>Excel: await context.sync()
-    Excel-->>UI: Data successfully written to sheet
-    UI-->>User: Displays success message in UI
+    %% Scenario 2: Search via Search Box & Cache Data
+    User->>UI: Searches for Series ID / URL
+    UI->>JS: Trigger textSearch()
+    JS->>JS: Check Data Cache
+    alt Data not in Cache
+        JS->>API: GET /logic/search?q={input}
+        API->>FRED: GET /fred/series & /fred/series/observations
+        FRED-->>API: JSON metadata & observations
+        API-->>JS: Processed JSON {info, data}
+        JS->>JS: Save to Cache
+    end
+    JS-->>UI: Display Series Info & Enable Load Buttons
+    User->>UI: (Or User clicks a Series from Category List)
+
+    %% Scenario 3: Load Data & Generate Charts
+    User->>UI: Clicks "Load Data into Current/New Sheet"
+    UI->>JS: loadDataIntoCurrentSheet() / loadDataIntoNewSheet()
+    JS->>Excel: Excel.run() -> Write Metadata & Data Tables
+    JS->>Excel: Create Histogram, Line Chart, Box Plot, Notes Box
+    Excel-->>JS: context.sync() completed
+    JS-->>UI: Prompt: "Generate Time Series Decomposition?"
+
+    %% Scenario 4: Time Series Decomposition
+    User->>UI: Selects components & Clicks "Generate Decomposition"
+    UI->>JS: generateDecompositionFromPrompt()
+    JS->>JS: Calculate Trend, Cyclical, Seasonal, Residual
+    JS->>Excel: Insert new columns into Table & Add Decomposition Line Chart
+    Excel-->>JS: context.sync() completed
+    JS-->>UI: Prompt: "Generate Pivot Table?"
+
+    %% Scenario 5: Pivot Table Generation
+    User->>UI: Selects Grouping/Aggregation & Clicks "Generate Pivot Table"
+    UI->>JS: generatePivotTable()
+    JS->>Excel: Create Helper Columns (Year, Quarter, Month)
+    JS->>Excel: Create Pivot Table from expanded data range
+    Excel-->>JS: context.sync() completed
+    JS-->>UI: Display Success & Restore Series View
 ```

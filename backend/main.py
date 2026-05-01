@@ -1,3 +1,23 @@
+"""
+REST API Proxy Backend for U.S. Federal Reserve Data Analysis Application.
+
+This module implements a FastAPI-based REST API that serves as a secure proxy to the 
+Federal Reserve Economic Data (FRED) API. The API enables Excel add-ins and web clients to:
+  - Query economic data categories and subcategories
+  - Retrieve available economic series within each category
+  - Access historical time-series data for specific economic indicators
+  - Fetch metadata and details about economic data series
+  - Search for FRED series via full URLs or raw Series IDs
+
+The application uses CORS middleware to facilitate cross-origin requests,
+allowing seamless integration between the backend API and Excel-based data analysis tools.
+
+Modules:
+  - FastAPI & HTTPException: Web framework for building REST APIs and handling errors
+  - CORSMiddleware: Enables cross-origin resource sharing for client compatibility
+  - requests: HTTP library for catching underlying FRED API communication errors
+  - Search: Custom wrapper class for querying and retrieving FRED data
+"""
 # --------------------------------------------------------------------------
 # IMPORTS
 # --------------------------------------------------------------------------
@@ -13,6 +33,11 @@ from dotenv import load_dotenv
 # APP INITIALIZATION
 # --------------------------------------------------------------------------
 
+"""
+Initialize the FastAPI application instance that serves as the web server proxy.
+This app handles all HTTP requests, validates environment variables for API 
+authentication, and routes them to appropriate endpoint handlers.
+"""
 app = FastAPI(title="FRED API Proxy", description="Proxy for FRED API to fetch economic data.")
 
 load_dotenv()
@@ -20,8 +45,14 @@ FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 if not FRED_API_KEY:
     print("WARNING: FRED_API_KEY not found in environment variables or .env file.")
 
+# Initialize Search class instance with the loaded API key for FRED API communication
 search = Search(api_key=FRED_API_KEY)
 
+"""
+Configure CORS (Cross-Origin Resource Sharing) middleware to enable the Excel add-in
+and web clients to communicate with this API proxy without being blocked by browser security policies.
+Allows specific local origins, methods, and headers to ensure full compatibility with the frontend.
+"""
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://localhost:3000", "https://127.0.0.1:3000", "http://localhost:3000", "http://127.0.0.1:3000"],
@@ -34,6 +65,13 @@ app.add_middleware(
 # CATEGORY ENDPOINTS
 # --------------------------------------------------------------------------
 
+"""
+GET ENDPOINT 1: Retrieve subcategories for a given category ID.
+URL Example: http://localhost:8080/categories/0
+This endpoint queries the FRED database through the Search wrapper and returns all 
+subcategories within a specified category. The response is converted to JSON format 
+for consumption by Excel clients. Includes error handling for bad HTTP responses.
+"""
 @app.get("/categories/{category_id}")
 def categories(category_id: int):
     try:
@@ -50,6 +88,13 @@ def categories(category_id: int):
 # SERIES ENDPOINTS
 # --------------------------------------------------------------------------
 
+"""
+GET ENDPOINT 2: Retrieve all economic data series within a specified category.
+URL Example: http://localhost:8080/series/125?order_by=popularity
+This endpoint returns a list of all available economic time series that belong to the given category.
+Results are formatted as JSON records for Excel compatibility and can be dynamically 
+ordered via query parameters.
+"""
 @app.get("/series/{category_id}")
 def series(category_id: int, order_by: str = Query("popularity")):
     try:
@@ -66,6 +111,13 @@ def series(category_id: int, order_by: str = Query("popularity")):
 # SERIES INFO ENDPOINTS (for displaying details without data)
 # --------------------------------------------------------------------------
 
+"""
+GET ENDPOINT 3: Retrieve metadata and information for a specific economic series ID.
+URL Example: http://localhost:8080/info/GDP
+This endpoint provides detailed metadata about a FRED series, including title, description,
+frequency, units, and other attributes relevant for understanding the economic indicator,
+without fetching the heavy historical data array. Serialized for seamless client integration.
+"""
 @app.get("/info/{series_id}")
 def series_info(series_id: str):
     try:
@@ -82,6 +134,13 @@ def series_info(series_id: str):
 # DATA ENDPOINTS
 # --------------------------------------------------------------------------
 
+"""
+GET ENDPOINT 4: Retrieve historical economic data for a specific FRED series ID.
+URL Example: http://localhost:8080/data/GDP
+This endpoint fetches the complete time-series data (dates and values) for a given economic indicator.
+To prevent 500 errors on massive series, it safely looks up the observation_start date first.
+The data is serialized as JSON records for seamless integration with Excel and other client applications.
+"""
 @app.get("/data/{series_id}")
 def data(series_id: str):
     try:
@@ -104,6 +163,14 @@ def data(series_id: str):
 # SEARCH ENDPOINTS
 # --------------------------------------------------------------------------
 
+"""
+GET ENDPOINT 5: Search and retrieve data and metadata from user input.
+URL Example: http://localhost:8080/logic/search?q=https://fred.stlouisfed.org/series/GDP
+This endpoint parses flexible user input (either a full FRED URL or a raw Series ID),
+extracts the valid ID, and fetches both the series metadata and historical observations.
+Packages both responses into a combined JSON dictionary for flexible client-side rendering
+and Excel integration.
+"""
 @app.get("/logic/search")
 def search_logic(q: str = Query(..., description="Search query for a FRED series ID or URL")):
     series_id = search.parse_search_input(q)

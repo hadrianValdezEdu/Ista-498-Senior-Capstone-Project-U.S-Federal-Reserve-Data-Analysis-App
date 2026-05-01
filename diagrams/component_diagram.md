@@ -1,34 +1,33 @@
 ```mermaid
 flowchart TD
   subgraph OfficeAddin["Office Add-in Runtime"]
-    OfficeHost["Excel / Office Host"]
+    OfficeHost["Excel Host"]
     UI["Taskpane UI\n(taskpane.html)"]
     JS["Taskpane Logic\n(taskpane.js)"]
+    Cache["LocalStorage / Memory\n(Caches Categories, Series, Data)"]
+    
     OfficeHost --> UI
     UI --> JS
+    JS <--> Cache
     JS -->|uses Office.js APIs| OfficeHost
   end
 
-  subgraph Backend["Backend Service"]
-    API["FastAPI Server\n(backend/main.py)"]
+  subgraph Backend["Backend Service (FastAPI)"]
+    API["FastAPI App\n(backend/main.py)"]
     Search["FRED Client Layer\n(backend/search.py)"]
-    API -->|uses search class| Search
+    API -->|uses| Search
   end
 
-  subgraph External["External Service"]
+  subgraph External["External Services"]
     FRED["FRED API"]
+    MLDash["ML Dashboard\n(Render App)"]
   end
 
   JS -->|HTTP JSON requests| API
+  UI -->|External Link| MLDash
   Search -->|HTTPS JSON requests| FRED
   FRED -->|JSON responses| Search
-  Search -->|cleaned / normalized data| API
+  Search -->|cleaned DataFrame / dicts| API
   API -->|JSON response| JS
-  JS -->|render results in taskpane / insert into excel sheet| UI
-
-  subgraph LocalDev["Local Development"]
-    Dev["webpack / npm dev server"]
-    Dev -->|serves taskpane HTML/JS| OfficeHost
-    OfficeHost -.->|loads add-in assets| Dev
-  end
+  JS -->|render results / charts / tables| UI
 ```

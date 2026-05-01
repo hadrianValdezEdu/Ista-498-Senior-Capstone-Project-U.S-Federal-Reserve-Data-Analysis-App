@@ -1,12 +1,31 @@
-/* --------------------------------------------------------------------------
-   taskpane.js - Fixed version for category navigation freezing
--------------------------------------------------------------------------- */
+/**
+ * Frontend UI Logic for U.S. Federal Reserve Data Analysis Application.
+ *
+ * This module provides the JavaScript logic for the custom Excel Add-in taskpane.
+ * It handles UI interactions, communicates with the FastAPI REST API proxy, 
+ * and heavily leverages the Excel JavaScript API to manipulate the active workbook.
+ *
+ * Core responsibilities:
+ *   - Querying the local backend for FRED economic data categories and series
+ *   - Maintaining a navigation state machine for seamless user browsing
+ *   - Caching metadata and heavy time-series data to prevent memory quota limits
+ *   - Writing historical observations into formatted Excel Tables
+ *   - Automating the generation of Pivot Tables, Line Charts, Histograms, and Box Plots
+ *   - Performing in-memory Time Series Decomposition directly inside Excel
+ */
 const BACKEND_BASE_URL = "https://localhost:8080"; // Use localhost as the backend is mapped to host's 8080
 
 /* --------------------------------------------------------------------------
    GLOBAL STATE & CACHES
 -------------------------------------------------------------------------- */
 
+/**
+ * Deserializes a stringified Map from localStorage.
+ * Standard JSON.parse cannot handle JavaScript Map objects directly, so we expect 
+ * them to be stored as an array of key-value pairs (e.g., [[key, value], [key, value]]).
+ * @param {string} key - The localStorage key to retrieve.
+ * @returns {Map} A hydrated Map instance, or an empty Map if missing/corrupt.
+ */
 function loadCacheFromLocalStorage(key) {
     const cachedString = localStorage.getItem(key);
     if (cachedString) {
@@ -21,7 +40,15 @@ function loadCacheFromLocalStorage(key) {
     return new Map();
 }
 
+/**
+ * Serializes a Map into a JSON string and stores it in localStorage.
+ * Catches QuotaExceededErrors which commonly occur in browsers/Excel if the user 
+ * browses too many categories and fills up the 5MB local storage limit.
+ * @param {string} key - The storage key.
+ * @param {Map} cacheMap - The Map to serialize.
+ */
 function saveCacheToLocalStorage(key, cacheMap) {
+    // Convert Map to array of pairs for JSON serialization
     const arrayToStore = Array.from(cacheMap.entries());
     try {
         localStorage.setItem(key, JSON.stringify(arrayToStore));
@@ -32,7 +59,13 @@ function saveCacheToLocalStorage(key, cacheMap) {
 
 let categoryCache = loadCacheFromLocalStorage('categoryCache');
 let seriesCache = loadCacheFromLocalStorage('seriesCache');
-let dataCache = new Map(); // Keep data in memory only to prevent 5MB localStorage QuotaExceededError
+
+// Keep massive historical data arrays strictly in memory.
+// If we tried to push thousands of data points into localStorage, the 5MB quota 
+// would blow up almost instantly inside the Excel Add-in sandbox.
+let dataCache = new Map(); 
+
+// Maintain a lightweight state machine array to support "Back" button navigation
 let navStack = [{ type: 'main' }];
 
 let currentSeriesId = null;
@@ -53,6 +86,11 @@ let lastLoadedDataRange = null; // Stores range info for Pivot Table generation
    INITIALIZATION
 -------------------------------------------------------------------------- */
 
+/**
+ * Initialize the Office Add-in application instance that serves as the UI frontend.
+ * This bootstraps the taskpane, binds all click handlers, and sets up event delegation
+ * to ensure full compatibility with the Excel client rendering engine.
+ */
 Office.onReady(() => {
     outputEl = document.getElementById("output");
     infoEl = document.getElementById("info");
@@ -89,9 +127,16 @@ Office.onReady(() => {
    HELPERS
 -------------------------------------------------------------------------- */
 
+/**
+ * Helper to wrap fetch calls and catch underlying backend communication errors.
+ * This explicitly checks for `res.ok` to catch HTTP 4xx/5xx responses from the 
+ * FastAPI backend. It attempts to parse the FastAPI HTTPException `detail` schema
+ * to provide user-friendly error messages to the Excel UI.
+ */
 async function fetchJSON(url) {
     const res = await fetch(url);
     if (!res.ok) {
+        // Attempt to parse the standard FastAPI error response: {"detail": "Error message"}
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.detail || `HTTP Error: ${res.status} ${res.statusText}`);
     }
@@ -99,11 +144,11 @@ async function fetchJSON(url) {
 }
 
 /**
- * Normalize API responses:
- * Accepts:
- *  - an array (direct)
- *  - an object with keys: categories, subcategories, results, data, series
- * Returns an array (possibly empty)
+ * Normalizes unpredictable API payload structures into a standard flat array.
+ * Because we are proxying FRED API data, the payload structure can vary 
+ * (e.g., some endpoints wrap arrays in { "categories": [...] } or { "seriess": [...] }).
+ * This function iterates through known candidate keys to extract the target array, 
+ * ensuring the rendering functions always receive an iterable object.
  */
 function normalizeArrayResponse(resp, candidateKeys = []) {
     if (!resp) return [];
@@ -119,7 +164,13 @@ function normalizeArrayResponse(resp, candidateKeys = []) {
     return [];
 }
 
+/**
+ * Queries proxy GET ENDPOINT 1 to retrieve subcategories for a given category ID.
+ * Utilizes the `categoryCache` to prevent redundant network calls as users navigate 
+ * back and forth through the category tree.
+ */
 async function getSubcategories(categoryId) {
+    // Check cache first; Map keys are stringified to prevent strict-type mismatches
     if (categoryCache.has(String(categoryId))) {
         return categoryCache.get(String(categoryId));
     }
@@ -130,6 +181,11 @@ async function getSubcategories(categoryId) {
     return data;
 }
 
+/**
+ * Queries proxy GET ENDPOINT 2 to retrieve all economic data series within a category.
+ * The cache key combines both the category ID and the sort order to ensure users 
+ * don't see stale ordered lists when switching the "Sort By" dropdown.
+ */
 async function getSeries(categoryId, orderBy = "popularity") {
     const cacheKey = `${categoryId}_${orderBy}`;
     if (seriesCache.has(cacheKey)) {
@@ -142,25 +198,40 @@ async function getSeries(categoryId, orderBy = "popularity") {
     return data;
 }
 
+/**
+ * Queries proxy GET ENDPOINT 4 to retrieve historical economic data arrays.
+ * Keeps the heavy historical data array strictly in local memory to prevent 
+ * 5MB localStorage QuotaExceeded errors inside the Excel runtime environment.
+ */
 async function getData(seriesId) {
     if (dataCache.has(String(seriesId))) {
         return dataCache.get(String(seriesId));
     }
+    // Retrieve array of {date, value} records
     const raw = await fetchJSON(`${BACKEND_BASE_URL}/data/${seriesId}`);
     const data = normalizeArrayResponse(raw, ['data', 'observations', 'results']);
     dataCache.set(String(seriesId), data);
     return data;
 }
 
+/**
+ * Toggles visibility and enabled-states for quick recall and bookmark UI elements.
+ */
 function updateBookmarkButtons() {
     btnQuickRecall.disabled = !lastLoadedSeries;
     btnViewBookmarks.disabled = sessionBookmarks.size === 0;
 }
 
+/**
+ * Prevents users from clicking "Back" when they are at the root level.
+ */
 function updateBackButton() {
     document.getElementById("btnBack").disabled = navStack.length <= 1;
 }
 
+/**
+ * Ensures Excel insertion buttons are disabled until a valid dataset is fully loaded into memory.
+ */
 function updateStatisticalAnalysisButton() {
     const isDataReadyForLoad = currentData && currentData.length > 0;
     btnLoadDataCurrentSheet.disabled = !isDataReadyForLoad;
@@ -168,6 +239,10 @@ function updateStatisticalAnalysisButton() {
     updateBookmarkButtons();
 }
 
+/**
+ * Aggressively clears all application state, purges localStorage, flushes memory caches,
+ * and resets the UI to its initial boot state.
+ */
 function resetCache() {
     localStorage.removeItem('categoryCache');
     localStorage.removeItem('seriesCache');
@@ -194,6 +269,10 @@ function resetCache() {
    CATEGORY / SERIES BROWSING
 -------------------------------------------------------------------------- */
 
+/**
+ * Bootstraps the UI by fetching the root FRED categories (Category ID 0).
+ * This is triggered explicitly on app load or via the "Browse Categories" button.
+ */
 async function loadRootCategories() {
     infoEl.innerHTML = "Loading categories...";
     outputEl.innerHTML = "";
@@ -217,6 +296,11 @@ async function loadRootCategories() {
     }
 }
 
+/**
+ * Global click event delegation handler for the output panel.
+ * Using event delegation is much more performant than attaching event listeners 
+ * to hundreds of dynamically generated category/series buttons.
+ */
 async function onOutputClick(event) {
     const target = event.target.closest("[data-type]");
     if (!target) return;
@@ -251,6 +335,12 @@ async function onOutputClick(event) {
     }
 }
 
+/**
+ * Handles navigating one layer deeper into a specific category.
+ * Fires off two parallel requests (subcategories + series) to minimize UI blocking time.
+ * Updates the `navStack` to enable "Back" button functionality.
+ * @param {number} categoryId 
+ */
 async function handleCategoryClick(categoryId) {
     infoEl.innerHTML = "Loading...";
     outputEl.innerHTML = "";
@@ -264,12 +354,15 @@ async function handleCategoryClick(categoryId) {
     try {
             const orderBy = document.getElementById("seriesSort").value;
 
+            // Use Promise.all to fetch child categories and data series simultaneously.
             const [subcats, seriesList] = await Promise.all([
                 getSubcategories(categoryId).catch(err => { console.warn("Subcategories fetch error:", err); return []; }),
                 getSeries(categoryId, orderBy).catch(err => { console.warn("Series fetch error:", err); return []; })
             ]);
 
-            outputEl.innerHTML = ""; // Clear immediately before rendering to prevent double-render race condition
+            // Clear immediately before rendering to prevent a double-render race condition 
+            // where the user clicks multiple categories quickly before the first request finishes.
+            outputEl.innerHTML = ""; 
 
             let hasContent = false;
             if (subcats && subcats.length > 0) {
@@ -294,6 +387,12 @@ async function handleCategoryClick(categoryId) {
     }
 }
 
+/**
+ * Triggered when a user clicks an actual economic indicator (e.g., "GDP").
+ * Fetches the heavy time-series data and detailed metadata, caching it into memory
+ * so it's ready to be instantly injected into the Excel worksheet.
+ * @param {string} seriesId 
+ */
 async function handleSeriesClick(seriesId) {
     infoEl.innerHTML = "Loading data for selected series...";
     outputEl.innerHTML = "";
@@ -334,6 +433,11 @@ async function handleSeriesClick(seriesId) {
     }
 }
 
+/**
+ * Pops the last state off the `navStack` and re-renders the previous view.
+ * Because of aggressive local storage caching, navigating backward is usually 
+ * instantaneous and requires zero network overhead.
+ */
 async function goBack() {
     if (navStack.length <= 1) return;
 
@@ -391,6 +495,11 @@ async function goBack() {
    TEXT SEARCH LOGIC
 -------------------------------------------------------------------------- */
 
+/**
+ * Queries proxy GET ENDPOINT 5: Search and retrieve data and metadata from user input.
+ * Parses flexible user input, extracts the valid ID, and loads both metadata and 
+ * historical observations into memory for immediate Excel integration.
+ */
 async function textSearch() {
     const input = document.getElementById("searchInput").value.trim();
     if (!input) return;
@@ -450,6 +559,11 @@ async function textSearch() {
    RENDERING FUNCTIONS
 -------------------------------------------------------------------------- */
 
+/**
+ * Renders a list of category buttons into the UI using a DocumentFragment.
+ * DocumentFragments are used to prevent multiple DOM reflows; elements are appended 
+ * in memory, and then injected into the real DOM all at once.
+ */
 function renderCategories(categories) {
     if (!categories || categories.length === 0) return;
 
@@ -472,6 +586,10 @@ function renderCategories(categories) {
     outputEl.appendChild(frag);
 }
 
+/**
+ * Renders a list of specific economic data series.
+ * Standardizes button IDs to ensure metadata fields match regardless of API inconsistencies.
+ */
 function renderSeries(seriesList) {
     if (!seriesList || seriesList.length === 0) return;
 
@@ -494,6 +612,10 @@ function renderSeries(seriesList) {
     outputEl.appendChild(frag);
 }
 
+/**
+ * Parses metadata schema from FRED and generates a clean, readable summary list.
+ * Strips out underscores from API keys and converts them to Title Case for better readability.
+ */
 function renderSeriesInfo(infoList) {
     outputEl.innerHTML = "<h3>Series Info</h3>";
     const frag = document.createDocumentFragment();
@@ -508,6 +630,7 @@ function renderSeriesInfo(infoList) {
         }
 
         for (const key in info) {
+            // Ignore 'title' as it's already rendered as the bold header
             if (Object.prototype.hasOwnProperty.call(info, key) && key !== 'title' && info[key]) {
                 const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                 htmlContent += `<strong>${label}:</strong> ${info[key]}<br>`;
@@ -524,6 +647,11 @@ function renderSeriesInfo(infoList) {
    STATISTICAL ANALYSIS
 -------------------------------------------------------------------------- */
 
+/**
+ * Evaluates the metadata of the loaded dataset to determine which Time Series 
+ * Decomposition components are valid. For instance, if data is already "Seasonally Adjusted"
+ * or is collected Annually, it disables the "Seasonal" checkbox to prevent mathematical errors.
+ */
 function promptForDecomposition() {
     navStack.push({ type: 'decompPrompt' });
     infoEl.innerHTML = `<p>Data successfully loaded into Excel! Would you like to perform a Time Series Decomposition?</p>`;
@@ -536,6 +664,7 @@ function promptForDecomposition() {
           !lastLoadedSeries.info.seasonal_adjustment.toLowerCase().includes("not seasonally adjusted")
         : false;
 
+    // Determine period length (L) for seasonal extraction based on frequency keywords.
     let L = 1;
     if (freq.includes("month")) L = 12;
     else if (freq.includes("quarter")) L = 4;
@@ -587,6 +716,12 @@ function promptForDecomposition() {
     updateBackButton();
 }
 
+/**
+ * In-memory Time Series Decomposition logic.
+ * Calculates Trend, Cyclical, Seasonal, and Residual components dynamically via moving averages.
+ * Safely manipulates the Excel grid by inserting entirely new columns to avoid overwriting 
+ * existing user data, and populates them with the computed numerical arrays.
+ */
 async function generateDecompositionFromPrompt() {
     const useTrend = document.getElementById("dcTrend").checked;
     const useCyclical = document.getElementById("dcCyclical").checked;
@@ -614,6 +749,8 @@ async function generateDecompositionFromPrompt() {
             const tableName = targetTable.name;
             const tableValues = fullTableRange.values;
             
+            // Verify that the table actually has data columns. 
+            // If users deleted columns manually before triggering this, we abort safely.
             if (fullTableRange.columnCount < 2) {
                 throw new Error("The loaded table does not have enough columns to perform decomposition.");
             }
@@ -636,6 +773,10 @@ async function generateDecompositionFromPrompt() {
             });
             const n = values.length;
 
+            /**
+             * Calculates Centered Moving Averages.
+             * This is the mathematical core of the trend extraction process.
+             */
             function getCenteredMA(arr, span) {
                 const result = new Array(arr.length).fill(null);
                 if (span <= 1) return arr;
@@ -643,10 +784,13 @@ async function generateDecompositionFromPrompt() {
                 for (let i = half; i < arr.length - half; i++) {
                     let sum = 0;
                     if (span % 2 === 0) {
+                        // For even spans (like 12 months), we must take the half-weight 
+                        // of the outer bounds to properly center the average to a specific month.
                         for (let j = i - half + 1; j < i + half; j++) sum += arr[j];
                         sum += (arr[i - half] + arr[i + half]) / 2;
                         result[i] = sum / span;
                     } else {
+                        // Odd spans cleanly center on the target index.
                         for (let j = i - half; j <= i + half; j++) sum += arr[j];
                         result[i] = sum / span;
                     }
@@ -654,6 +798,7 @@ async function generateDecompositionFromPrompt() {
                 return result;
             }
 
+            // Use short and long spans to extract cyclicality vs general baseline trend.
             const maShort = getCenteredMA(values, Math.max(L, 3));
             const maLong = getCenteredMA(values, Math.max(L * 5, 5));
 
@@ -662,9 +807,12 @@ async function generateDecompositionFromPrompt() {
             const seasonal = new Array(n).fill(0);
             const residual = new Array(n).fill(null);
 
+            // Component extraction logic:
             for (let i = 0; i < n; i++) { if (maLong[i] !== null) trend[i] = maLong[i]; if (maShort[i] !== null && maLong[i] !== null) cyclical[i] = maShort[i] - maLong[i]; }
 
             if (useSeasonal) {
+                // Calculate average seasonality by isolating periods (e.g. all Januaries)
+                // and removing the local trend, then centering the seasonal averages.
                 const seasonSums = new Array(L).fill(0);
                 const seasonCounts = new Array(L).fill(0);
                 for (let i = 0; i < n; i++) { if (maShort[i] !== null) { seasonSums[i % L] += (values[i] - maShort[i]); seasonCounts[i % L]++; } }
@@ -674,6 +822,7 @@ async function generateDecompositionFromPrompt() {
                 for (let i = 0; i < n; i++) seasonal[i] = seasonAvg[i % L];
             }
 
+            // Residual is whatever is left over after extracting Trend, Cyclical, and Seasonal components.
             for (let i = 0; i < n; i++) { if (maShort[i] !== null) { residual[i] = values[i] - maShort[i] - (useSeasonal ? seasonal[i] : 0); } }
 
             const existingCols = new Set(targetTable.columns.items.map(c => c.name));
@@ -693,7 +842,9 @@ async function generateDecompositionFromPrompt() {
 
             if (colsToAddCount > 0) {
                 // --- 1. Make Space by inserting entire columns ---
-                // This is the most robust way to shift all content on the sheet and avoid breaking other tables.
+                // This is a critical safety feature: by inserting full worksheet columns rather than just 
+                // writing to adjacent cells, we ensure we don't accidentally overwrite or corrupt any custom 
+                // calculations or side-tables the user may have placed directly to the right of the data table.
                 const tableRange = targetTable.getRange().load("columnIndex, columnCount, rowCount");
                 await context.sync();
                 const insertColIndex = tableRange.columnIndex + tableRange.columnCount;
@@ -721,6 +872,7 @@ async function generateDecompositionFromPrompt() {
             }
 
             const newTableRange = targetTable.getRange();
+            // Ensure the newly manipulated columns are visible to the user.
             newTableRange.columnHidden = false; // Unhide columns 
             newTableRange.load("columnIndex, rowIndex, rowCount");
             await context.sync();
@@ -729,10 +881,14 @@ async function generateDecompositionFromPrompt() {
             const chart = sheet.charts.add(Excel.ChartType.line, chartRange, Excel.ChartSeriesBy.columns);
             chart.title.text = `${info.title || seriesIdFromHeader} - Decomposition`;
 
-            // Position chart under the datasets' notes and aligned with the metadata
+            // ---------------------------------------------------------
+            // Chart Positioning Logic
+            // ---------------------------------------------------------
             const chartStartCol = lastLoadedDataRange.metadataStartColZeroBased;
             
-            // Dynamically calculate position relative to previously created charts
+            // Dynamically calculate vertical position relative to previously created charts.
+            // Since charts are floating shapes and don't take up cell space mathematically, 
+            // we anchor them to specific row offsets based on the metadata block's height.
             const metadataRowCount = lastLoadedDataRange.metadataRowCount;
             const histogramEndRow = metadataRowCount + 2 + 15 - 1;
             const lineChartEndRow = histogramEndRow + 2 + 15 - 1;
@@ -759,6 +915,11 @@ async function generateDecompositionFromPrompt() {
    EXCEL INSERTION FUNCTIONS
 -------------------------------------------------------------------------- */
 
+/**
+ * Core integration logic: Writes the in-memory JSON data array into the active Excel worksheet.
+ * Formats the raw data into a stylized Excel Table, renders the associated metadata,
+ * and triggers automated statistical charting.
+ */
 async function loadDataIntoCurrentSheet() {
     if (!currentData || currentData.length === 0) {
         infoEl.innerHTML = "<p>No data loaded yet.</p>";
@@ -781,15 +942,16 @@ async function loadDataIntoCurrentSheet() {
         await Excel.run(async (context) => {
             const sheet = context.workbook.worksheets.getActiveWorksheet();
             const usedRange = sheet.getUsedRangeOrNullObject();
-            usedRange.load("columnIndex, columnCount, isNullObject, width"); // Load width for dynamic sizing
+            usedRange.load("columnIndex, columnCount, isNullObject, width"); 
             sheet.load("name"); // Load the name property of the sheet object
             await context.sync();
 
             let startColumnIndex;
+            // If the sheet is totally blank, start at A1.
             if (usedRange.isNullObject) {
                 startColumnIndex = 1;
             } else {
-                // Ensure enough space from the last used column
+                // Otherwise, push the new data to the right of whatever the user has, leaving a 2-column padding gap.
                 startColumnIndex = usedRange.columnIndex + usedRange.columnCount + 2; 
             }
 
@@ -826,15 +988,18 @@ async function loadDataIntoCurrentSheet() {
             const metadataStartColZeroBased = startColumnIndex - 1;
             const metadataRange = sheet.getRangeByIndexes(0, metadataStartColZeroBased, metadataArray.length, 2);
             metadataRange.values = metadataArray;
+            // Let Excel automatically calculate the width based on string length.
             metadataRange.format.autofitColumns();
             metadataRange.getCell(0, 0).getResizedRange(metadataArray.length - 1, 0).format.font.bold = true;
 
+            // Place historical data table leaving empty padding columns between it and the metadata.
             const dataStartColZeroBased = metadataStartColZeroBased + 4; // 2 columns for metadata + 2 empty columns
             const dataRange = sheet.getRangeByIndexes(0, dataStartColZeroBased, dataValues.length, 2); // 2 columns: Date, Value
             dataRange.values = dataValues;
             dataRange.format.autofitColumns();
             dataRange.getRow(0).format.font.bold = true;
 
+            // Generate a random table name to prevent collisions if the user loads the exact same series multiple times.
             const safeTableName = "Table_" + currentSeriesId.replace(/[^a-zA-Z0-9]/g, "") + "_" + Math.floor(Math.random() * 1000);
             const table = sheet.tables.add(dataRange, true);
             table.name = safeTableName;
@@ -876,6 +1041,10 @@ async function loadDataIntoCurrentSheet() {
     }
 }
 
+/**
+ * Exact same logic as loadDataIntoCurrentSheet, but isolates the process into a completely
+ * new worksheet to keep massive data queries organized and clean.
+ */
 async function loadDataIntoNewSheet() {
     if (!currentData || currentData.length === 0) {
         infoEl.innerHTML = "<p>No data loaded yet.</p>";
@@ -901,6 +1070,8 @@ async function loadDataIntoNewSheet() {
             
             let uniqueSheetName = sheetName;
             let counter = 1;
+            // Safety loop: If a sheet named "GDP" already exists, append a counter (e.g., "GDP_1").
+            // Ensures Excel doesn't throw a fatal exception trying to create a duplicate tab.
             while (true) {
                 let existingSheet = context.workbook.worksheets.getItemOrNullObject(uniqueSheetName);
                 await context.sync();
@@ -1000,6 +1171,11 @@ async function loadDataIntoNewSheet() {
    PIVOT TABLE GENERATION
 -------------------------------------------------------------------------- */
 
+/**
+ * Analyzes data frequency (Annual, Quarterly, Monthly) and constructs a smart
+ * UI prompt for generating Pivot Tables. Disables granular date options if the 
+ * dataset doesn't support them (e.g., you cannot group Annual data by Month).
+ */
 function promptForPivotTable() {
     navStack.push({ type: 'pivotPrompt' });
     infoEl.innerHTML = `<p>Data successfully loaded into Excel! Would you like to generate a Pivot Table?</p>`;
@@ -1082,6 +1258,11 @@ function promptForPivotTable() {
     updateBackButton();
 }
 
+/**
+ * Generates a native Excel Pivot Table using the previously loaded dataset.
+ * Dynamically handles date groupings (Year/Quarter/Month) and aggregations
+ * based on the economic indicator's specific frequency.
+ */
 async function generatePivotTable() {
     const aggFn = document.getElementById("ptAggregation").value;
     const groupFields = [];
@@ -1118,7 +1299,9 @@ async function generatePivotTable() {
             const extraDataValues = [];
             extraDataValues.push(groupFields); // Write header
 
-            // Pre-format month names to make PivotTable sorting alphabetical
+            // Pre-format month names to make PivotTable sorting alphabetical.
+            // If we just used "Jan", "Feb", Excel's default alphabetical sort would put "Apr" first.
+            // Prepended numbers guarantee chronological ordering in the native Pivot Table UI.
             const monthNames = ["01 - Jan", "02 - Feb", "03 - Mar", "04 - Apr", "05 - May", "06 - Jun", "07 - Jul", "08 - Aug", "09 - Sep", "10 - Oct", "11 - Nov", "12 - Dec"];
 
             currentData.forEach(r => {
@@ -1141,7 +1324,9 @@ async function generatePivotTable() {
                 extraDataValues.push(rowVals);
             });
 
-            // Place helper columns immediately to the right of the existing table
+            // Place helper columns immediately to the right of the existing table.
+            // We keep these columns hidden so they don't clutter the user's workspace, 
+            // but the Pivot Table engine can still scrape them for hierarchical groupings.
             const helperColStart = dataStartCol + tableTotalCols;
             const extraRange = sheet.getRangeByIndexes(0, helperColStart, rowCount, extendedCols);
             extraRange.values = extraDataValues;
@@ -1155,9 +1340,11 @@ async function generatePivotTable() {
 
             await context.sync();
 
+            // Randomize pivot table name to prevent runtime collisions.
             const safeName = "Pivot_" + lastLoadedDataRange.seriesId.replace(/[^a-zA-Z0-9]/g, "") + "_" + Math.floor(Math.random() * 1000);
             const pivotTable = sheet.pivotTables.add(safeName, fullDataRange, targetCell);
 
+            // Build hierarchies programmatically based on user checkboxes.
             groupFields.forEach(field => {
                 pivotTable.rowHierarchies.add(pivotTable.hierarchies.getItem(field));
             });
@@ -1179,6 +1366,10 @@ async function generatePivotTable() {
     }
 }
 
+/**
+ * Resets the UI back to the specific Series view, clearing out the Pivot Table 
+ * or Decomposition prompts.
+ */
 function restoreSeriesView() {
     if (!lastLoadedSeries) return;
     renderSeriesInfo([lastLoadedSeries.info]);
@@ -1195,6 +1386,9 @@ function restoreSeriesView() {
    BOOKMARK / QUICK RECALL STUBS (kept minimal)
 -------------------------------------------------------------------------- */
 
+/**
+ * Restores the most recently loaded dataset from memory directly to the view.
+ */
 function quickRecallLastSeries() {
     if (!lastLoadedSeries) {
         infoEl.innerHTML = "<p>No series to recall.</p>";
@@ -1242,6 +1436,9 @@ async function handleBookmarkedSeriesClick(seriesId) {
     }
 }
 
+/**
+ * Loops through the `sessionBookmarks` Map and generates rapid-access buttons.
+ */
 function viewSessionBookmarks() {
     if (sessionBookmarks.size === 0) {
         infoEl.innerHTML = "<p>No bookmarks in this session.</p>";
@@ -1262,6 +1459,11 @@ function viewSessionBookmarks() {
     infoEl.innerHTML = "";
 }
 
+/**
+ * Instructs the Excel API to generate a Histogram chart to visualize data distribution.
+ * Extracts the raw value array directly from the worksheet grid.
+ * @param {string} currentSeriesName 
+ */
 async function createHistogram(currentSeriesName) {
     await Excel.run(async (context) => {
         if (!lastLoadedDataRange) return; // Safety check
@@ -1294,6 +1496,11 @@ async function createHistogram(currentSeriesName) {
     });
 }
 
+/**
+ * Creates a floating text box shape on the worksheet to display long-form notes from FRED.
+ * Calculates its vertical offset to ensure it falls neatly below all previously generated charts.
+ * @param {string} notesContent 
+ */
 async function createNotesTextBox(notesContent) {
     if (!notesContent || !lastLoadedDataRange) return;
 
@@ -1324,6 +1531,7 @@ async function createNotesTextBox(notesContent) {
         shape.width = widthRange.width;
         shape.height = 150; // A reasonable default height, can be adjusted or made dynamic
 
+        // Format the typography so the text box doesn't look completely terrible by default.
         shape.textFrame.textRange.font.size = 9;
         shape.textFrame.textRange.font.name = "Calibri";
         shape.textFrame.wordWrap = true;
@@ -1333,6 +1541,11 @@ async function createNotesTextBox(notesContent) {
         await context.sync();
     });
 }
+/**
+ * Instructs the Excel API to generate a Box and Whisker plot.
+ * Highly useful for visualizing outliers within the economic time series.
+ * @param {string} currentSeriesName 
+ */
 async function createBoxPlot(currentSeriesName) {
     await Excel.run(async (context) => {
         if (!lastLoadedDataRange) return; // Safety check
@@ -1363,6 +1576,11 @@ async function createBoxPlot(currentSeriesName) {
     });
 }
 
+/**
+ * Creates the primary trend visualization Line Chart for the time series.
+ * Binds the X-axis to the Date column and the Y-axis to the Value column.
+ * @param {string} currentSeriesName 
+ */
 async function createLineChart(currentSeriesName) {
     await Excel.run(async (context) => {
         if (!lastLoadedDataRange) return; // Safety check
