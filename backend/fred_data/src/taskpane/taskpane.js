@@ -1,7 +1,7 @@
 /* --------------------------------------------------------------------------
    taskpane.js - Fixed version for category navigation freezing
 -------------------------------------------------------------------------- */
-const BACKEND_BASE_URL = "http://localhost:8080"; // Use localhost as the backend is mapped to host's 8080
+const BACKEND_BASE_URL = "https://localhost:8080"; // Use localhost as the backend is mapped to host's 8080
 
 /* --------------------------------------------------------------------------
    GLOBAL STATE & CACHES

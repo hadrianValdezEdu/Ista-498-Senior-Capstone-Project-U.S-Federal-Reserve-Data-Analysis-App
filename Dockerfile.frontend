@@ -1,0 +1,37 @@
+# --- Stage 1: Build the frontend application ---
+FROM node:18-alpine AS build-stage
+
+WORKDIR /app/frontend
+
+# Copy package.json and package-lock.json (if any)
+# Assuming package.json is located in backend/fred_data/
+COPY ./backend/fred_data/package*.json ./
+
+# Install Node.js dependencies
+RUN npm install
+
+# Copy the rest of the frontend source code
+COPY ./backend/fred_data/ ./
+
+# Build the application.
+# This assumes you have a 'build' script in backend/fred_data/package.json
+# that outputs static files to a 'dist' folder (e.g., backend/fred_data/dist).
+# If your build output directory is different, adjust the path in the next stage.
+RUN npm run build
+
+# --- Stage 2: Serve the static files with Nginx ---
+FROM nginx:stable-alpine AS production-stage
+
+# Copy the built files from the build-stage to Nginx's web root
+# Adjust '/app/frontend/dist' if your build output directory is different
+COPY --from=build-stage /app/frontend/dist /usr/share/nginx/html
+
+# Remove default Nginx configuration and copy custom one
+RUN rm /etc/nginx/conf.d/default.conf
+COPY ./nginx.conf /etc/nginx/conf.d/default.conf
+
+# Expose port 443 (Nginx HTTPS)
+EXPOSE 443
+
+# Command to run Nginx
+CMD ["nginx", "-g", "daemon off;"]

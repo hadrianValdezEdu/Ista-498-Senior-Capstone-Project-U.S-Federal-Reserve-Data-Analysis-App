@@ -1,0 +1,17 @@
+FROM python:3.14.3-slim
+
+WORKDIR /app
+
+# 3. Copy requirements and install
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 4. Copy the backend source code
+# This command automatically copies the .env file if its inside the backend folder
+COPY ./backend /app/backend
+
+# 5. Tell Docker which port the app runs on
+EXPOSE 8080
+
+# 6. Start the FastAPI server
+CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080", "--ssl-keyfile", "/certs/localhost.key", "--ssl-certfile", "/certs/localhost.crt"]

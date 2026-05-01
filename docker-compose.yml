@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8080:8080" # Map host port 8080 to container port 8080
+    # Mount the .env file from the host to the container.
+    # This ensures the FRED_API_KEY is available to your FastAPI app.
+    volumes:
+      - ./backend/.env:/app/.env
+      - ~/.office-addin-dev-certs:/certs
+    # Environment variables can also be passed directly if preferred,
+    # environment:
+    #   - FRED_API_KEY=${FRED_API_KEY} # Uncomment and set in host env if not using .env
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:443" # Map host port 3000 to container port 443 (Nginx HTTPS)
+    volumes:
+      - ~/.office-addin-dev-certs:/certs
+    depends_on:
+      - backend # Ensure backend starts before frontend

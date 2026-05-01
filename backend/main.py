@@ -5,8 +5,9 @@ from fastapi import FastAPI
 from fastapi import HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import requests # Import requests to catch its exceptions
-from search import Search
+from backend.search import Search
 import os
+from dotenv import load_dotenv
 
 # --------------------------------------------------------------------------
 # APP INITIALIZATION
@@ -14,8 +15,11 @@ import os
 
 app = FastAPI(title="FRED API Proxy", description="Proxy for FRED API to fetch economic data.")
 
-# WARNING: Move this key to a safe .env file in the future.
+load_dotenv()
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
+if not FRED_API_KEY:
+    print("WARNING: FRED_API_KEY not found in environment variables or .env file.")
+
 search = Search(api_key=FRED_API_KEY)
 
 app.add_middleware(
