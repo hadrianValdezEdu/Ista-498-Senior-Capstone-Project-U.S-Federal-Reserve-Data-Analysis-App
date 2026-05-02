@@ -13,7 +13,7 @@
  *   - Automating the generation of Pivot Tables, Line Charts, Histograms, and Box Plots
  *   - Performing in-memory Time Series Decomposition directly inside Excel
  */
-const BACKEND_BASE_URL = "https://localhost:8080"; // Use localhost as the backend is mapped to host's 8080
+const BACKEND_BASE_URL = "http://localhost:8080"; // Use localhost as the backend is mapped to host's 8080
 
 /* --------------------------------------------------------------------------
    GLOBAL STATE & CACHES
@@ -871,6 +871,22 @@ async function generateDecompositionFromPrompt() {
                 await context.sync();
             }
 
+            // --- 5. Fix the original Line Chart auto-expansion ---
+            // Excel's default behavior is to auto-expand charts that span an entire table.
+            // We need to strip out the newly added decomposition series from the original trend chart.
+            const origChart = sheet.charts.getItemOrNullObject("TrendLineChart_" + tableName);
+            origChart.load("name, series/count");
+            await context.sync();
+            
+            if (!origChart.isNullObject) {
+                const seriesCount = origChart.series.count;
+                // Keep index 0 (Value), delete any new series (Trend, Cyclical, etc.) that Excel auto-injected
+                for (let i = seriesCount - 1; i >= 1; i--) {
+                    origChart.series.getItemAt(i).delete();
+                }
+                await context.sync();
+            }
+
             const newTableRange = targetTable.getRange();
             // Ensure the newly manipulated columns are visible to the user.
             newTableRange.columnHidden = false; // Unhide columns 
@@ -1588,13 +1604,18 @@ async function createLineChart(currentSeriesName) {
 
         // 1. Identify the data (X = Dates, Y = Values)
         const startCol = lastLoadedDataRange.dataStartColZeroBased;
+        const valueColumnIndex = startCol + 1;
         const rowCount = lastLoadedDataRange.rowCount;
         
-        // Line charts need two columns for time series: Date and Value.
-        const dataRange = sheet.getRangeByIndexes(1, startCol, rowCount - 1, 2);
+        // To prevent Excel from auto-expanding the chart's data range when the table gets new columns 
+        // (e.g. during decomposition), initialize it only with the Value column, then set the X-axis manually.
+        const dataRange = sheet.getRangeByIndexes(1, valueColumnIndex, rowCount - 1, 1);
+        const dateRange = sheet.getRangeByIndexes(1, startCol, rowCount - 1, 1);
 
         // 2. Add the Chart (Line)
         const chart = sheet.charts.add(Excel.ChartType.line, dataRange, Excel.ChartSeriesBy.columns);
+        chart.name = "TrendLineChart_" + lastLoadedDataRange.tableName;
+        chart.series.getItemAt(0).setXAxisValues(dateRange);
 
         chart.title.text = `${currentSeriesName || "Series"} Trend (Line Chart)`;
 

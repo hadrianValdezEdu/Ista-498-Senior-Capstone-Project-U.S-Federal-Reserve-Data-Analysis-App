@@ -25,7 +25,7 @@ from fastapi import FastAPI
 from fastapi import HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import requests # Import requests to catch its exceptions
-from backend.search import Search
+from search import Search
 import os
 from dotenv import load_dotenv
 
